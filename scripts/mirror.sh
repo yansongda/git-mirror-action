@@ -98,9 +98,10 @@ if [[ "$DRY_RUN" == true ]]; then
   log "===== DRY RUN：仅检查，不推送 ====="
   while IFS=$'\t' read -r name is_private def_branch; do
     for p in "${PLATFORMS[@]}"; do
+      CURRENT_PLATFORM="$p"
       acct=$(platform_account "$p")
       priv=$(resolve_private "$is_private" "$p")
-      if platform_repo_exists "$p" "$acct" "$name"; then
+      if platform_call repo_exists "$acct" "$name"; then
         printf '  [dry] %-30s → %s/%s: 已存在 (private=%s)\n' "$name" "$p" "$acct" "$priv"
       else
         printf '  [dry] %-30s → %s/%s: 不存在 (将创建 private=%s)\n' "$name" "$p" "$acct" "$priv"

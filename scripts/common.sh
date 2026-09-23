@@ -94,38 +94,53 @@ dst_api() {
   API_BODY=$(printf '%s' "$resp" | sed '$d')
 }
 
-# ---------- 目标端默认平台操作（基于 v5 API 组合；异构平台可覆盖 dst_api 改变行为） ----------
-platform_repo_exists() { # platform owner repo
-  dst_api GET "$1" "/repos/$2/$3"
+# ---------- 目标端默认平台操作（基于 v5 API 组合；异构平台可覆盖） ----------
+# 签名统一为 (owner repo [...])，平台取自 CURRENT_PLATFORM（由 platform_call 分派时设置）
+platform_repo_exists() { # owner repo
+  dst_api GET "$CURRENT_PLATFORM" "/repos/$1/$2"
   [[ $API_CODE == "200" ]]
 }
 
-platform_create_repo() { # platform owner repo private
+platform_create_repo() { # owner repo private
   # 注意: Gitee API 对 private=false 字符串处理有坑（可能被当作 truthy 建私有），
   # 因此公开仓库不传 private 参数（默认公开），仅私有时显式传 private=true
-  local data="name=$3"
-  [[ "$4" == true ]] && data="$data&private=true"
-  dst_api POST "$1" "/user/repos" "$data"
+  local data="name=$2"
+  [[ "$3" == true ]] && data="$data&private=true"
+  dst_api POST "$CURRENT_PLATFORM" "/user/repos" "$data"
   [[ $API_CODE == "201" ]]
 }
 
-platform_set_visibility() { # platform owner repo private
+platform_set_visibility() { # owner repo private
   # 校正已存在仓库的可见性，使其与源一致（幂等）
   # 公开: 传 public=true（Gitee 的 public 参数优先级高于 private）
   # 私有: 传 private=true
   local data
-  if [[ "$4" == true ]]; then
+  if [[ "$3" == true ]]; then
     data="private=true"
   else
     data="public=true"
   fi
-  dst_api PATCH "$1" "/repos/$2/$3" "$data"
+  dst_api PATCH "$CURRENT_PLATFORM" "/repos/$1/$2" "$data"
   [[ $API_CODE == "200" ]]
 }
 
-platform_set_default_branch() { # platform owner repo branch
-  dst_api PATCH "$1" "/repos/$2/$3" "default_branch=$4"
+platform_set_default_branch() { # owner repo branch
+  dst_api PATCH "$CURRENT_PLATFORM" "/repos/$1/$2" "default_branch=$3"
   [[ $API_CODE == "200" ]]
+}
+
+# ---------- 平台特定实现分派 ----------
+# 平台插件（platforms/<name>.sh）可定义 platform_<name>_<op> 覆盖默认实现
+# （如 GitCode 的 boolean 用 1/0 而非 true/false）
+# 用法: platform_call <op> <args...>  需先设置 CURRENT_PLATFORM
+platform_call() {
+  local op="$1"; shift
+  local fn="platform_${CURRENT_PLATFORM:-}_${op}"
+  if declare -F "$fn" >/dev/null 2>&1; then
+    "$fn" "$@"
+  else
+    "platform_${op}" "$@"
+  fi
 }
 
 # ---------- 源端 HTTPS 认证（GIT_ASKPASS + basic auth） ----------

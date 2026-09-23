@@ -60,7 +60,8 @@ add_source_ref() { # repo ref（如 dev 或 v1.0，tag 前缀 t:）
 }
 
 # 造空目标仓库
-make_empty_dest() { # 目标仓库目录
+make_empty_dest() { # 目标仓库目录 [仓库名=repo-a]
+  local repo="${2:-repo-a}"
   mkdir -p "$1"
-  git init --bare "$1/repo-a.git" -q
+  git init --bare "$1/$repo.git" -q
 }

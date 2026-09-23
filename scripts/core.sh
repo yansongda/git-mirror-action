@@ -33,7 +33,9 @@ sync_one() {
   fi
 
   # 3. 逐个目标平台
+  local platform_ok=0
   while IFS= read -r p; do
+    CURRENT_PLATFORM="$p"
     acct=$(platform_account "$p")
     if [[ -z "$acct" ]]; then
       log "  [warn] $p 未配置 $(platform_var "$p" ACCOUNT)，跳过"
@@ -43,9 +45,9 @@ sync_one() {
     log "  → $p/$acct (private=$priv)"
 
     # 3a. 目标仓库不存在则创建
-    if platform_repo_exists "$p" "$acct" "$repo"; then
+    if platform_call repo_exists "$acct" "$repo"; then
       log "    目标仓库已存在"
-    elif platform_create_repo "$p" "$acct" "$repo" "$priv"; then
+    elif platform_call create_repo "$acct" "$repo" "$priv"; then
       log "    目标仓库创建成功"
     else
       log "    [错误] 创建仓库失败 (HTTP $API_CODE): $(printf '%s' "$API_BODY" | sanitize | head -c 300)"
@@ -53,15 +55,16 @@ sync_one() {
     fi
 
     # 3b. 校正可见性（跟随源，可修复历史误建为私有的公开仓库）
-    if platform_set_visibility "$p" "$acct" "$repo" "$priv"; then
+    if platform_call set_visibility "$acct" "$repo" "$priv"; then
       log "    可见性校正为 $([ "$priv" == true ] && echo private || echo public)"
     else
       log "    [warn] 校正可见性失败 (HTTP $API_CODE)"
     fi
 
-    # 3c. 空仓库不推送
+    # 3c. 空仓库不推送（建仓即视为该平台成功）
     if [[ "$is_empty" == true ]]; then
       log "    空仓库，跳过推送"
+      platform_ok=1
       continue
     fi
 
@@ -76,14 +79,21 @@ sync_one() {
       fi
     fi
     log "    push 完成"
+    platform_ok=1
 
     # 3e. 修正目标端默认分支（mirror push 不携带远端 HEAD）
-    if platform_set_default_branch "$p" "$acct" "$repo" "$def_branch"; then
+    if platform_call set_default_branch "$acct" "$repo" "$def_branch"; then
       log "    默认分支已设为 $def_branch"
     else
       log "    [warn] 设置默认分支失败 (HTTP $API_CODE)"
     fi
   done < <(discover_platforms)
+
+  # 4. 所有目标平台均失败才判定仓库同步失败（单平台失败不再被静默吞掉）
+  if [[ $platform_ok -eq 0 ]]; then
+    log "  [错误] 所有目标平台均同步失败"
+    return 1
+  fi
 
   log "== 同步完成: $repo =="
 }
