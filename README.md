@@ -101,7 +101,7 @@
 | 项目 | 做法 |
 |---|---|
 | 依赖面 | 仅 GitHub 官方 `actions/checkout` + runner 自带工具，零第三方 action |
-| 源端认证 | PAT 经 `http.extraHeader` 传递，不进入 URL / remote 配置 / 日志 |
+| 源端认证 | PAT 经 `GIT_ASKPASS` basic auth 传递，不进入 URL / remote 配置 / 日志 |
 | 目标端认证 | 推送纯 SSH 密钥；API token 仅用于建仓/查询，日志输出经 `sanitize` 脱敏 |
 | 防中间人 | `ssh-keyscan` 固定 known_hosts，不使用 `StrictHostKeyChecking=no` |
 | 令牌管理 | 全部存 GitHub Secrets，最小权限，建议定期轮换 |

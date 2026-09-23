@@ -57,6 +57,7 @@ rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"/logs "$WORK_DIR"/status/ok "$WORK_DIR"/status/fail
 
 init_ssh
+init_git_auth
 
 log "========== git-mirror-action =========="
 log "源:   $SRC_ACCOUNT ($SRC_ACCOUNT_TYPE)"

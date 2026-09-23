@@ -110,6 +110,23 @@ platform_set_default_branch() { # platform owner repo branch
   [[ $API_CODE == "200" ]]
 }
 
+# ---------- 源端 HTTPS 认证（GIT_ASKPASS + basic auth） ----------
+# GitHub 的 git 端点不接受 Authorization: Bearer/token header（一律 401），
+# 只接受 basic auth；通过 askpass 脚本提供用户名/密码，
+# token 经环境变量读取，不进入 URL / git 配置 / 日志 / 磁盘
+init_git_auth() {
+  export GIT_TERMINAL_PROMPT=0
+  cat > "$HOME/.git-askpass" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  *Username*) echo "x-access-token" ;;
+  *) echo "${SRC_TOKEN:-}" ;;
+esac
+EOF
+  chmod 700 "$HOME/.git-askpass"
+  export GIT_ASKPASS="$HOME/.git-askpass"
+}
+
 # ---------- SSH 初始化（推送密钥 + 固定 known_hosts 防中间人） ----------
 init_ssh() {
   [[ -n "${MIRROR_KEY:-}" ]] || return 0

@@ -17,8 +17,8 @@ sync_one() {
 
   log "== 开始同步: $repo (默认分支: $def_branch) =="
 
-  # 1. clone --mirror（PAT 经 http.extraHeader 传递，不进 URL / 日志）
-  _timeout git -c "http.extraHeader=Authorization: token $SRC_TOKEN" clone --mirror \
+  # 1. clone --mirror（源端认证走 GIT_ASKPASS basic auth，token 不进 URL / 日志）
+  _timeout git clone --mirror \
     "https://github.com/$SRC_ACCOUNT/$repo.git" "$WORK_DIR/$repo.git" >/dev/null 2>&1
   log "  clone 完成"
 
