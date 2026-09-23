@@ -73,4 +73,27 @@ t "场景2: 失败仓库清单输出"
 assert_contains "$out" "失败仓库"
 assert_contains "$out" "no-such-repo"
 
+# ---------- 场景3: 最终汇总表（含私有仓库脱敏 + 耗时） ----------
+t "场景3: 最终汇总表输出"
+# 场景2 中 repo-a 为公开、no-such-repo 公开失败，但为验证私有脱敏单独构造
+assert_contains "$out" "最终汇总"
+assert_contains "$out" "成功 1 / 失败 1"
+
+# ---------- 场景3: 全私有仓库最终汇总脱敏 ----------
+export MOCK_GH_REPOS_JSON='[{"name":"private-one","private":true,"fork":false,"archived":false,"default_branch":"main"}]'
+# 源仓库 private-one 不存在 → clone 失败，走失败路径
+out=$(env PATH=$PROJECT_ROOT/tests/mocks:$PATH HOME=$FAKE_ROOT/home \
+  SRC_ACCOUNT=test SRC_TOKEN=fake SRC_ACCOUNT_TYPE=user \
+  BLACKLIST= WHITELIST= SKIP_FORKS=false SKIP_ARCHIVED=false \
+  DST_PRIVATE=auto CONCURRENCY=2 REPO_TIMEOUT=120 DRY_RUN=false DEBUG=false \
+  DST_GITEE_ACCOUNT=test DST_GITEE_TOKEN=fake \
+  DST_GITCODE_ACCOUNT=test DST_GITCODE_TOKEN=fake \
+  MIRROR_KEY=fake-key WORK_DIR=$FAKE_ROOT/workdir-priv \
+  bash $PROJECT_ROOT/scripts/mirror.sh)
+rc=$?
+t "场景3: 私有仓库在最终汇总中脱敏"
+assert_status 1 $rc
+assert_contains "$out" "priv***"      # private-one → 前4位+***
+assert_not_contains "$out" "private-one"
+
 summary

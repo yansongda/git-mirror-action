@@ -37,7 +37,7 @@ clone_mirror() { # <repo> → 设置 IS_EMPTY=true(空)|false；非零退出 = c
 
   if ! clone_out=$(_timeout git clone --mirror \
       "https://github.com/$SRC_ACCOUNT/$repo.git" "$WORK_DIR/$repo.git" 2>&1); then
-    log "    [错误] clone 失败: $(err_tail 3 "$clone_out")"
+    log "    [错误] clone 失败: $(err_tail 3 "$(redact_repo "$clone_out" "$SRC_ACCOUNT" "$repo")")"
     return 1
   fi
   log "  clone 完成"
@@ -60,7 +60,7 @@ mirror_push() { # <acct> <repo> → 0/1
     if push_out=$(_timeout git --git-dir="$WORK_DIR/$repo.git" push --mirror "$url" 2>&1); then
       return 0
     fi
-    log "    [错误] push 失败（第 $attempt 次）: $(err_tail 2 "$push_out")"
+    log "    [错误] push 失败（第 $attempt 次）: $(err_tail 2 "$(redact_repo "$push_out" "$acct" "$repo")")"
   done
   return 1
 }
@@ -87,7 +87,7 @@ sync_to_platform() { # <platform> <repo> <is_private> <def_branch> <is_empty> �
   elif platform_call create_repo "$acct" "$repo" "$priv"; then
     log "    目标仓库创建成功"
   else
-    log "    [错误] 创建仓库失败 (HTTP $API_CODE): $(err_tail 1 "$API_BODY" 300)"
+    log "    [错误] 创建仓库失败 (HTTP $API_CODE): $(err_tail 1 "$(redact_repo "$API_BODY" "$acct" "$repo")" 300)"
     return 1
   fi
 
@@ -122,10 +122,12 @@ sync_to_platform() { # <platform> <repo> <is_private> <def_branch> <is_empty> �
 # ---------- 同步单个仓库到全部目标平台 ----------
 # 用法: sync_one <repo> <is_private:true|false> <default_branch>
 sync_one() {
-  local repo="$1" is_private="$2" def_branch="$3" p platform_ok=0
+  local repo="$1" is_private="$2" def_branch="$3" p platform_ok=0 shown
   IS_EMPTY=false
 
-  log "== 开始同步: $repo (默认分支: $def_branch) =="
+  REPO_MASK_PRIVATE="$is_private"   # 供 redact_repo 判断是否脱敏
+  shown=$(mask_repo "$repo" "$is_private")
+  log "== 开始同步: $shown (默认分支: $def_branch) =="
 
   # 1. 克隆镜像仓库 + 空仓库检测（IS_EMPTY 由 clone_mirror 设置）
   clone_mirror "$repo" || return 1
@@ -142,7 +144,7 @@ sync_one() {
     return 1
   fi
 
-  log "== 同步完成: $repo =="
+  log "== 同步完成: $shown =="
 }
 
 # ---------- 进程入口（仅被直接执行时；被 source 时只加载函数供测试） ----------
@@ -150,17 +152,19 @@ main() {
   set -euo pipefail
 
   local repo="${1:-}" is_private="${2:-}" def_branch="${3:-}"
-  local logfile rc start_ts dur
+  local logfile rc start_ts dur shown
   [[ -n "$repo" ]] || die "缺少参数: <repo> <is_private> <default_branch>"
 
   WORK_DIR="${WORK_DIR:-${RUNNER_TEMP:-/tmp}/git-mirror}"
   mkdir -p "$WORK_DIR"/logs "$WORK_DIR"/status/ok "$WORK_DIR"/status/fail
 
+  REPO_MASK_PRIVATE="$is_private"
+  shown=$(mask_repo "$repo" "$is_private")
   logfile="$WORK_DIR/logs/$repo.log"
 
   # 实时进度：开始行 + 耗时统计
   start_ts=$(date +%s)
-  printf '  [sync] %-30s 开始同步 (默认分支: %s)\n' "$repo" "$def_branch"
+  printf '  [sync] %-30s 开始同步 (默认分支: %s)\n' "$shown" "$def_branch"
 
   # 子 shell 隔离执行：显式 set -e（子 shell 会继承外层的 set +e 状态，
   # 且 if 条件上下文会禁用 errexit，因此必须在子 shell 内重新启用），
@@ -168,17 +172,19 @@ main() {
   # 并 tee 到 stdout（实时可见）与日志文件
   set +e
   ( set -e; sync_one "$repo" "$is_private" "$def_branch" ) 2>&1 \
-    | sed "s/^/[$repo] /" | tee "$logfile"
+    | sed "s/^/[$shown] /" | tee "$logfile"
   rc=${PIPESTATUS[0]}
   set -e
 
   dur=$(( $(date +%s) - start_ts ))
   if [[ $rc -eq 0 ]]; then
-    printf '  [ OK ] %-30s (%ss)\n' "$repo" "$dur"
+    printf '  [ OK ] %-30s (%ss)\n' "$shown" "$dur"
     echo "$repo" >> "$WORK_DIR/status/ok/list"
+    printf '%s\t%s\tok\t%s\n' "$repo" "$is_private" "$dur" >> "$WORK_DIR/status/results.tsv"
   else
-    printf '  [FAIL] %-30s (%ss)\n' "$repo" "$dur"
-    echo "$repo" >> "$WORK_DIR/status/fail/list"
+    printf '  [FAIL] %-30s (%ss)\n' "$shown" "$dur"
+    printf '%s\t%s\n' "$repo" "$is_private" >> "$WORK_DIR/status/fail/list"
+    printf '%s\t%s\tfail\t%s\n' "$repo" "$is_private" "$dur" >> "$WORK_DIR/status/results.tsv"
   fi
 
   # 统一 exit 0：失败经 status/fail/list 上报（mirror.sh 的 summarize 汇总），

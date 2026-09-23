@@ -92,20 +92,21 @@ fetch_repos() {
 # ---------- 过滤（黑/白名单、fork、archived），结果写入 final.tsv ----------
 filter_repos() {
   : > "$WORK_DIR/final.tsv"
-  local skipped=0
+  local skipped=0 name is_private is_fork is_archived def_branch shown
   while IFS=$'\t' read -r name is_private is_fork is_archived def_branch; do
     [[ -n "$name" ]] || continue
+    shown=$(mask_repo "$name" "$is_private")
     if [[ -n "$BLACKLIST" ]] && in_list "$name" "$BLACKLIST"; then
-      log "  跳过(黑名单): $name"; skipped=$((skipped + 1)); continue
+      log "  跳过(黑名单): $shown"; skipped=$((skipped + 1)); continue
     fi
     if [[ -n "$WHITELIST" ]] && ! in_list "$name" "$WHITELIST"; then
-      log "  跳过(非白名单): $name"; skipped=$((skipped + 1)); continue
+      log "  跳过(非白名单): $shown"; skipped=$((skipped + 1)); continue
     fi
     if [[ "$SKIP_FORKS" == true && "$is_fork" == true ]]; then
-      log "  跳过(fork): $name"; skipped=$((skipped + 1)); continue
+      log "  跳过(fork): $shown"; skipped=$((skipped + 1)); continue
     fi
     if [[ "$SKIP_ARCHIVED" == true && "$is_archived" == true ]]; then
-      log "  跳过(archived): $name"; skipped=$((skipped + 1)); continue
+      log "  跳过(archived): $shown"; skipped=$((skipped + 1)); continue
     fi
     printf '%s\t%s\t%s\n' "$name" "$is_private" "$def_branch" >> "$WORK_DIR/final.tsv"
   done < "$WORK_DIR/repos.tsv"
@@ -116,16 +117,18 @@ filter_repos() {
 # ---------- DRY-RUN：仅检查目标端状态，不产生任何推送 ----------
 dry_run_mode() {
   log "===== DRY RUN：仅检查，不推送 ====="
+  local name is_private def_branch p shown priv
   while IFS=$'\t' read -r name is_private def_branch; do
+    shown=$(mask_repo "$name" "$is_private")
     for p in "${PLATFORMS[@]}"; do
       CURRENT_PLATFORM="$p"
       platform_load "$p" || continue
       acct=$(platform_account "$p")
       priv=$(resolve_private "$is_private" "$p")
       if platform_call repo_exists "$acct" "$name"; then
-        printf '  [dry] %-30s → %s/%s: 已存在 (private=%s)\n' "$name" "$p" "$acct" "$priv"
+        printf '  [dry] %-30s → %s/%s: 已存在 (private=%s)\n' "$shown" "$p" "$acct" "$priv"
       else
-        printf '  [dry] %-30s → %s/%s: 不存在 (将创建 private=%s)\n' "$name" "$p" "$acct" "$priv"
+        printf '  [dry] %-30s → %s/%s: 不存在 (将创建 private=%s)\n' "$shown" "$p" "$acct" "$priv"
       fi
     done
   done < "$WORK_DIR/final.tsv"
@@ -139,21 +142,43 @@ sync_all() {
   xargs -P "$CONCURRENCY" -n 3 bash "$SCRIPT_DIR/core.sh" < "$WORK_DIR/final.tsv"
 }
 
-# ---------- 汇总结果，有失败则退出非零 ----------
+# ---------- 汇总：失败仓库详情（退出码由 main 统一判断） ----------
 summarize() {
-  local ok_n=0 fail_n=0
+  local ok_n=0 fail_n=0 f is_private shown
   [[ -f "$WORK_DIR/status/ok/list" ]] && ok_n=$(wc -l < "$WORK_DIR/status/ok/list" | tr -d ' ')
   [[ -f "$WORK_DIR/status/fail/list" ]] && fail_n=$(wc -l < "$WORK_DIR/status/fail/list" | tr -d ' ')
   log "===== 汇总: 成功 $ok_n / 失败 $fail_n / 共 $FINAL_COUNT ====="
   if [[ "$fail_n" -gt 0 ]]; then
-    log "失败仓库:"
-    while IFS= read -r f; do
-      log "  --- $f ---"
+    log "失败仓库详情:"
+    while IFS=$'\t' read -r f is_private; do
+      shown=$(mask_repo "$f" "$is_private")
+      log "  --- $shown ---"
       tail -20 "$WORK_DIR/logs/$f.log" | sed 's/^/      /'
     done < "$WORK_DIR/status/fail/list"
-    exit 1
+  else
+    log "全部同步完成"
   fi
-  log "全部同步完成"
+}
+
+# ---------- 最终汇总（逐仓库成败 + 耗时一览表，结尾输出） ----------
+final_summary() {
+  local ok_n=0 fail_n=0 shown r priv st dur
+  log "===== 最终汇总 ====="
+  if [[ ! -f "$WORK_DIR/status/results.tsv" ]]; then
+    log "  无同步记录"
+    return
+  fi
+  while IFS=$'\t' read -r r priv st dur; do
+    shown=$(mask_repo "$r" "$priv")
+    if [[ "$st" == ok ]]; then
+      printf '  [ OK ]  %-30s %4ss\n' "$shown" "$dur"
+      ok_n=$((ok_n + 1))
+    else
+      printf '  [FAIL]  %-30s %4ss\n' "$shown" "$dur"
+      fail_n=$((fail_n + 1))
+    fi
+  done < "$WORK_DIR/status/results.tsv"
+  log "===== 成功 $ok_n / 失败 $fail_n / 共 $((ok_n + fail_n)) ====="
 }
 
 # ---------- 主流程 ----------
@@ -170,6 +195,10 @@ main() {
   else
     sync_all
     summarize
+    final_summary
+    if [[ -f "$WORK_DIR/status/fail/list" && $(wc -l < "$WORK_DIR/status/fail/list" | tr -d ' ') -gt 0 ]]; then
+      exit 1
+    fi
   fi
 }
 

@@ -85,6 +85,36 @@ assert_contains "$(printf 'Authorization: token abc123' | sanitize)" 'Authorizat
 t "sanitize 原文无 token 不变"
 assert_eq "hello world" "$(printf 'hello world' | sanitize)"
 
+# ---------- mask_repo（私有仓库日志名脱敏） ----------
+t "mask_repo 公开仓库原样"
+assert_eq "repo-a" "$(mask_repo repo-a false)"
+
+t "mask_repo 私有长名保留前4位+***"
+assert_eq "repo***" "$(mask_repo repo-a true)"
+
+t "mask_repo 私有短名至少保留1位"
+assert_eq "a***" "$(mask_repo ab true)"
+
+t "mask_repo 超短名全掩码"
+assert_eq "***" "$(mask_repo a true)"
+
+t "mask_repo MASK_REPO_KEEP 可覆盖"
+export MASK_REPO_KEEP=6
+assert_eq "repo-***" "$(mask_repo repo-a true)"   # 6字符名+keep=6 → 降为5位+***
+unset MASK_REPO_KEEP
+
+# ---------- redact_repo（错误文本内仓库名替换） ----------
+t "redact_repo 私有: owner/repo 与裸名均替换"
+REPO_MASK_PRIVATE=true
+assert_eq "push to git@host.com:acct/repo*** failed repo***" \
+  "$(redact_repo 'push to git@host.com:acct/repo-a failed repo-a' acct repo-a)"
+
+t "redact_repo 公开: 原样返回"
+REPO_MASK_PRIVATE=false
+assert_eq "push to git@host.com:acct/repo-a failed repo-a" \
+  "$(redact_repo 'push to git@host.com:acct/repo-a failed repo-a' acct repo-a)"
+unset REPO_MASK_PRIVATE
+
 # ---------- 平台操作方法（mock curl；source 平台插件自包含实现） ----------
 export PATH="$PROJECT_ROOT/tests/mocks:$PATH"
 export DST_GITEE_TOKEN=fake DST_GITCODE_TOKEN=fake

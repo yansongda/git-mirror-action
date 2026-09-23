@@ -15,6 +15,30 @@ sanitize() {
   sed -E 's#(access_token=)[^&"[:space:]]+#\1***#g; s#(Authorization: (token|Bearer) )[^"[:space:]]+#\1***#g'
 }
 
+# ---------- 私有仓库名称脱敏（公开仓库原样输出） ----------
+# 私有仓库日志中只显示开头 N 位 + ***（N = MASK_REPO_KEEP，默认 4，可覆盖）
+mask_repo() { # <repo> <is_private:true|false> → 日志显示名
+  local repo="$1" is_private="$2" len=${#1} keep="${MASK_REPO_KEEP:-4}" n
+  [[ "$is_private" == true ]] || { printf '%s' "$repo"; return; }
+  n=$keep
+  if (( n >= len )); then
+    # 仓库名过短时至少保留 1 位，避免完整暴露
+    n=$(( len > 1 ? len - 1 : 0 ))
+  fi
+  printf '%s%s' "${repo:0:n}" '***'
+}
+
+# ---------- 错误文本内私有仓库名脱敏（URL / API body 中的仓库名替换为显示名） ----------
+# 需先经 mask_repo 得到显示名；公开仓库（显示名==原名）直接原样返回
+redact_repo() { # <text> <owner> <repo> → 替换后的文本
+  local text="$1" owner="$2" repo="$3" shown
+  shown=$(mask_repo "$repo" "${REPO_MASK_PRIVATE:-false}")
+  [[ "$shown" == "$repo" ]] && { printf '%s' "$text"; return; }
+  # 先替换 owner/repo 形态（URL / full_name），再替换裸仓库名
+  text="${text//$owner\/$repo/$owner/$shown}"
+  printf '%s' "${text//$repo/$shown}"
+}
+
 # ---------- 命令超时（Linux 用 timeout；macOS 无则直接执行） ----------
 if command -v timeout >/dev/null 2>&1; then
   _timeout() { timeout "${REPO_TIMEOUT:-600}" "$@"; }
