@@ -96,6 +96,21 @@ assert_file_contains "$WORK_DIR/retry.log" "push 完成"
 unset MOCK_FAIL_PUSH MOCK_FAIL_MARKER
 rm -rf "$WORK_DIR/repo-a.git"
 
+# ---------- 不推送 refs/pull/* 隐藏 ref（--mirror 会因 hidden ref 被拒） ----------
+t "sync_one 不推送 refs/pull 隐藏 ref"
+mkdir -p "$MOCK_GITEE_DIR/test"
+git init --bare "$MOCK_GITEE_DIR/test/repo-a.git" -q
+make_source_repo repo-a main
+add_source_ref repo-a dev
+# 在源镜像里手工造一个 refs/pull/* 隐藏 ref（GitHub 私有镜像克隆会有）
+git --git-dir="$MOCK_GH_DIR/test/repo-a.git" update-ref refs/pull/1/head refs/heads/main
+( set -e; sync_one repo-a true main ) >"$WORK_DIR/pullref.log" 2>&1
+assert_status 0 $?
+assert_file_contains "$WORK_DIR/pullref.log" "push 完成"
+# 目标端不应出现 refs/pull
+assert_eq "" "$(git --git-dir="$MOCK_GITEE_DIR/test/repo-a.git" for-each-ref refs/pull | head -1)"
+rm -rf "$WORK_DIR/repo-a.git"
+
 # ---------- 默认分支失败仅警告 ----------
 t "sync_one 默认分支设置失败仅警告"
 export MOCK_PATCH_CODE=500

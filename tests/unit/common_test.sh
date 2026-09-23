@@ -155,6 +155,19 @@ t "gitcode create_repo 私有传 JSON private:true(201)"
 platform_gitcode_create_repo test repo-a true
 assert_status 0 $?
 
+t "gitcode create_repo 成功返回 200 也视为成功"
+export MOCK_CREATE_CODE=200
+export CURRENT_PLATFORM=gitcode
+platform_gitcode_create_repo test repo-a true
+assert_status 0 $?
+unset MOCK_CREATE_CODE
+
+t "gitcode create_repo 失败(500)"
+export MOCK_CREATE_CODE=500
+platform_gitcode_create_repo test repo-a true
+assert_status 1 $?
+unset MOCK_CREATE_CODE
+
 t "gitcode set_visibility 公开传 JSON private:false(200)"
 platform_gitcode_set_visibility test repo-a false
 assert_status 0 $?

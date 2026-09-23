@@ -51,13 +51,17 @@ clone_mirror() { # <repo> → 设置 IS_EMPTY=true(空)|false；非零退出 = c
   fi
 }
 
-# ---------- 镜像推送（--mirror: 只推变化 + 删除目标端多余分支/tag；失败重试一次） ----------
+# ---------- 镜像推送（显式 refs/heads+tags + --prune，失败重试一次） ----------
+# 不用 git push --mirror：它会把 GitHub 的 refs/pull/* 隐藏 ref 一并推送，
+# Gitee/GitCode 会拒绝更新 hidden ref（deny updating a hidden ref）导致整批失败。
+# 改为显式推送 refs/heads/* 与 refs/tags/* 并 --prune（保留删除多余分支/tag 的语义）
 mirror_push() { # <acct> <repo> → 0/1
   local acct="$1" repo="$2" url push_out attempt
   url="git@$(platform_host "$CURRENT_PLATFORM"):$acct/$repo.git"
 
   for attempt in 1 2; do
-    if push_out=$(_timeout git --git-dir="$WORK_DIR/$repo.git" push --mirror "$url" 2>&1); then
+    if push_out=$(_timeout git --git-dir="$WORK_DIR/$repo.git" push --prune "$url" \
+        "+refs/heads/*:refs/heads/*" "+refs/tags/*:refs/tags/*" 2>&1); then
       return 0
     fi
     log "    [错误] push 失败（第 $attempt 次）: $(err_tail 2 "$(redact_repo "$push_out" "$acct" "$repo")")"

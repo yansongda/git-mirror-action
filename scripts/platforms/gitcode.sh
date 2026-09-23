@@ -45,7 +45,8 @@ platform_gitcode_create_repo() { # owner repo private
   local body="{\"name\":\"$2\"}"
   [[ "$3" == true ]] && body="{\"name\":\"$2\",\"private\":true}"
   platform_gitcode_request POST "/user/repos" "$body"
-  [[ $API_CODE == "201" ]]
+  # GitCode 建仓成功返回 200（非 201），两者均视为成功
+  [[ $API_CODE == "200" || $API_CODE == "201" ]]
 }
 
 platform_gitcode_set_visibility() { # owner repo private
