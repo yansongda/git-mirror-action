@@ -23,21 +23,24 @@ mkdir -p "$WORK_DIR"/logs "$WORK_DIR"/status/ok "$WORK_DIR"/status/fail
 
 logfile="$WORK_DIR/logs/$repo.log"
 
+# 实时进度：开始行 + 耗时统计
+start_ts=$(date +%s)
+printf '  [sync] %-30s 开始同步 (默认分支: %s)\n' "$repo" "$def_branch"
+
 # 子 shell 隔离执行：显式 set -e（子 shell 会继承外层的 set +e 状态，
 # 且 if 条件上下文会禁用 errexit，因此必须在子 shell 内重新启用），
-# sync_one 内任何命令失败即整体非零，由 rc 捕获
+# sync_one 内任何命令失败即整体非零；输出 tee 到 stdout（实时可见）并归档日志
 set +e
-( set -e; sync_one "$repo" "$is_private" "$def_branch" ) >"$logfile" 2>&1
-rc=$?
+( set -e; sync_one "$repo" "$is_private" "$def_branch" ) 2>&1 | tee "$logfile"
+rc=${PIPESTATUS[0]}
 set -e
+
+dur=$(( $(date +%s) - start_ts ))
 if [[ $rc -eq 0 ]]; then
-  printf '  [ OK ] %s\n' "$repo"
+  printf '  [ OK ] %-30s (%ss)\n' "$repo" "$dur"
   echo "$repo" >> "$WORK_DIR/status/ok/list"
 else
-  printf '  [FAIL] %s\n' "$repo"
+  printf '  [FAIL] %-30s (%ss)\n' "$repo" "$dur"
   echo "$repo" >> "$WORK_DIR/status/fail/list"
-  if [[ "${DEBUG:-false}" == true ]]; then
-    tail -40 "$logfile" | sed 's/^/         /'
-  fi
 fi
 exit 0

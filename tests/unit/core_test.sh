@@ -66,7 +66,7 @@ mkdir -p "$MOCK_GITEE_DIR/test"
 git init --bare "$MOCK_GITEE_DIR/test/repo-a.git" -q
 ( set -e; sync_one repo-a true main ) >"$WORK_DIR/retry.log" 2>&1
 assert_status 0 $?
-assert_file_contains "$WORK_DIR/retry.log" "push 失败，重试一次"
+assert_file_contains "$WORK_DIR/retry.log" "重试一次"
 assert_file_contains "$WORK_DIR/retry.log" "push 完成"
 unset MOCK_FAIL_PUSH MOCK_FAIL_MARKER
 rm -rf "$WORK_DIR/repo-a.git"

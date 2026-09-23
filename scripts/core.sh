@@ -18,8 +18,11 @@ sync_one() {
   log "== 开始同步: $repo (默认分支: $def_branch) =="
 
   # 1. clone --mirror（源端认证走 GIT_ASKPASS basic auth，token 不进 URL / 日志）
-  _timeout git clone --mirror \
-    "https://github.com/$SRC_ACCOUNT/$repo.git" "$WORK_DIR/$repo.git" >/dev/null 2>&1
+  if ! clone_out=$(_timeout git clone --mirror \
+      "https://github.com/$SRC_ACCOUNT/$repo.git" "$WORK_DIR/$repo.git" 2>&1); then
+    log "    [错误] clone 失败: $(printf '%s' "$clone_out" | sanitize | tail -3 | tr '\n' ' ')"
+    return 1
+  fi
   log "  clone 完成"
 
   # 2. 空仓库（无任何分支/tag）标记：仍建仓，但不推送
@@ -56,12 +59,12 @@ sync_one() {
     fi
 
     # 3c. 增量推送（--mirror: 只推变化 + 删除目标端多余分支/tag）
-    if ! _timeout git --git-dir="$WORK_DIR/$repo.git" push --mirror \
-        "git@$(platform_host "$p"):$acct/$repo.git" 2>&1 | sanitize; then
-      log "    push 失败，重试一次..."
-      if ! _timeout git --git-dir="$WORK_DIR/$repo.git" push --mirror \
-          "git@$(platform_host "$p"):$acct/$repo.git" 2>&1 | sanitize; then
-        log "    [错误] push 失败"
+    if ! push_out=$(_timeout git --git-dir="$WORK_DIR/$repo.git" push --mirror \
+        "git@$(platform_host "$p"):$acct/$repo.git" 2>&1); then
+      log "    [错误] push 失败（$(printf '%s' "$push_out" | sanitize | tail -2 | tr '\n' ' ')，重试一次..."
+      if ! push_out=$(_timeout git --git-dir="$WORK_DIR/$repo.git" push --mirror \
+          "git@$(platform_host "$p"):$acct/$repo.git" 2>&1); then
+        log "    [错误] push 失败（重试后仍失败）: $(printf '%s' "$push_out" | sanitize | tail -2 | tr '\n' ' ')"
         continue
       fi
     fi
