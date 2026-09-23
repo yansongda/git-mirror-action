@@ -78,17 +78,30 @@ dst_api() {
   base="$PLATFORM_API"
   token=$(platform_token "$platform")
   local curlargs=(-sS --max-time 60 -w $'\n%{http_code}')
-  if [[ "$method" == GET ]]; then
-    curlargs+=(-G)
-  else
-    curlargs+=(-X "$method")
-  fi
-  if [[ -n "$data" ]]; then
-    resp=$(curl "${curlargs[@]}" -d "access_token=$token" -d "$data" "$base$path") \
+
+  # JSON body 模式：data 以 { 开头时按 application/json 发送（如 GitCode 的 PATCH/POST）
+  if [[ -n "$data" && "$data" == \{* ]]; then
+    if [[ "$method" == GET ]]; then
+      curlargs+=(-G)
+    else
+      curlargs+=(-X "$method")
+    fi
+    resp=$(curl "${curlargs[@]}" -H "Content-Type: application/json" -d "$data" \
+        "$base$path?access_token=$token") \
       || { API_CODE="000"; API_BODY="curl 失败"; return 1; }
   else
-    resp=$(curl "${curlargs[@]}" -d "access_token=$token" "$base$path") \
-      || { API_CODE="000"; API_BODY="curl 失败"; return 1; }
+    if [[ "$method" == GET ]]; then
+      curlargs+=(-G)
+    else
+      curlargs+=(-X "$method")
+    fi
+    if [[ -n "$data" ]]; then
+      resp=$(curl "${curlargs[@]}" -d "access_token=$token" -d "$data" "$base$path") \
+        || { API_CODE="000"; API_BODY="curl 失败"; return 1; }
+    else
+      resp=$(curl "${curlargs[@]}" -d "access_token=$token" "$base$path") \
+        || { API_CODE="000"; API_BODY="curl 失败"; return 1; }
+    fi
   fi
   API_CODE=$(printf '%s' "$resp" | tail -n1)
   API_BODY=$(printf '%s' "$resp" | sed '$d')

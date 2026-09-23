@@ -38,8 +38,8 @@ assert_eq "3" "$(git --git-dir="$MOCK_GITEE_DIR/test/repo-a.git" show-ref | wc -
 assert_eq "3" "$(git --git-dir="$MOCK_GITCODE_DIR/test/repo-a.git" show-ref | wc -l | tr -d ' ')"
 assert_file_contains "$WORK_DIR/sync.log" "默认分支已设为 main"
 assert_file_contains "$WORK_DIR/sync.log" "可见性校正为 private"   # 源私有 → 目标私有
-# GitCode 覆盖实现: 建仓传 private=1（而非 true）
-assert_contains "$(grep 'gitcode.com/api/v5/user/repos' "$MOCK_LOG_FILE")" "private=1"
+# GitCode 覆盖实现: 建仓 JSON 传 private:true（而非 form 的 true/false）
+assert_contains "$(grep 'gitcode.com/api/v5/user/repos' "$MOCK_LOG_FILE")" '"private":true'
 unset MOCK_LOG_FILE
 
 # ---------- 公开仓库: 建仓参数不传 private=false、校正传 public=true ----------
@@ -51,12 +51,12 @@ rm -rf "$WORK_DIR/repo-pub.git"
 export MOCK_LOG_FILE="$WORK_DIR/api.log"; rm -f "$MOCK_LOG_FILE"
 ( set -e; sync_one repo-pub false main ) >"$WORK_DIR/pub.log" 2>&1
 assert_status 0 $?
-# gitcode 不存在 → 建仓；建仓请求（user/repos）不得含 private=false（Gitee 的坑）
+# gitcode 不存在 → 建仓；建仓请求（user/repos）JSON 不得含 private 字段（公开默认）
 create_line=$(grep 'user/repos' "$MOCK_LOG_FILE" | head -1)
-assert_not_contains "$create_line" "private=false"
-# 可见性校正请求含 public=true（gitee）与 private=0（gitcode 覆盖实现）
+assert_not_contains "$create_line" "private"
+# 可见性校正: gitee form public=true + gitcode JSON private:false
 assert_contains "$(cat "$MOCK_LOG_FILE")" "public=true"
-assert_contains "$(cat "$MOCK_LOG_FILE")" "private=0"
+assert_contains "$(cat "$MOCK_LOG_FILE")" '"private":false'
 assert_file_contains "$WORK_DIR/pub.log" "可见性校正为 public"
 unset MOCK_LOG_FILE
 rm -rf "$WORK_DIR/repo-pub.git"
