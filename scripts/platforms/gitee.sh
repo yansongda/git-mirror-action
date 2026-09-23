@@ -19,7 +19,7 @@ platform_gitee_request() {
   local token base
   token=$(platform_token gitee)
   base=$(platform_gitee_api)
-  local curlargs=(-sS --max-time 60 -w $'\n%{http_code}')
+  local curlargs=(-sS --max-time 120 -w $'\n%{http_code}')
   if [[ "$method" == GET ]]; then
     curlargs+=(-G)
   else
@@ -46,7 +46,14 @@ platform_gitee_create_repo() { # owner repo private
   local data="name=$2"
   [[ "$3" == true ]] && data="$data&private=true"
   platform_gitee_request POST "/user/repos" "$data"
-  [[ $API_CODE == "201" ]]
+  # 幂等: 仓库实际已存在（repo_exists 被限流/超时误判不存在时）→ 422 且含“已存在”也视为成功
+  if [[ $API_CODE == "201" ]]; then
+    return 0
+  fi
+  if [[ $API_CODE == "422" && "$API_BODY" == *已存在* ]]; then
+    return 0
+  fi
+  return 1
 }
 
 platform_gitee_set_visibility() { # owner repo private
@@ -60,6 +67,7 @@ platform_gitee_set_visibility() { # owner repo private
 }
 
 platform_gitee_set_default_branch() { # owner repo branch
-  platform_gitee_request PATCH "/repos/$1/$2" "default_branch=$3"
+  # name 为 PATCH 必填参数（漏传会 400）
+  platform_gitee_request PATCH "/repos/$1/$2" "name=$2&default_branch=$3"
   [[ $API_CODE == "200" ]]
 }

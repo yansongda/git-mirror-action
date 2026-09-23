@@ -145,9 +145,24 @@ platform_gitee_create_repo test repo-a true
 assert_status 1 $?
 unset MOCK_CREATE_CODE
 
+t "gitee create_repo 422已存在视为成功(幂等)"
+export MOCK_CREATE_CODE=422
+export CURRENT_PLATFORM=gitee
+platform_gitee_create_repo test repo-a true
+assert_status 0 $?
+unset MOCK_CREATE_CODE
+
 t "gitee set_default_branch(200)"
 platform_gitee_set_default_branch test repo-a main
 assert_status 0 $?
+
+t "gitee set_default_branch 带 name 必填参数"
+export MOCK_LOG_FILE="/tmp/gitee-api2.log"; rm -f "$MOCK_LOG_FILE"
+platform_gitee_set_default_branch test repo-a main
+assert_status 0 $?
+assert_contains "$(cat "$MOCK_LOG_FILE")" "name=repo-a"
+assert_contains "$(cat "$MOCK_LOG_FILE")" "default_branch=main"
+unset MOCK_LOG_FILE
 
 # GitCode（JSON body）
 export CURRENT_PLATFORM=gitcode

@@ -19,7 +19,7 @@ platform_gitcode_request() {
   local token base
   token=$(platform_token gitcode)
   base=$(platform_gitcode_api)
-  local curlargs=(-sS --max-time 60 -w $'\n%{http_code}')
+  local curlargs=(-sS --max-time 120 -w $'\n%{http_code}')
   if [[ "$method" == GET ]]; then
     curlargs+=(-G)
     resp=$(curl "${curlargs[@]}" -d "access_token=$token" "$base$path") \

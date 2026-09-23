@@ -30,8 +30,13 @@ if [[ "$args" == *default_branch* ]]; then
 fi
 
 # 建仓（POST .../user/repos）
+#  MOCK_CREATE_CODE=422 时模拟“已存在”（repo_exists 误判后的幂等场景）
 if [[ "$args" == *api/v5/user/repos* ]]; then
-  printf '%s\n%s' '{"id":3}' "${MOCK_CREATE_CODE:-201}"
+  if [[ "${MOCK_CREATE_CODE:-201}" == "422" ]]; then
+    printf '%s\n%s' '{"error":{"base":["已存在同地址仓库（忽略大小写）"]}}' "422"
+  else
+    printf '%s\n%s' '{"id":3}' "${MOCK_CREATE_CODE:-201}"
+  fi
   exit 0
 fi
 
