@@ -36,10 +36,10 @@ if [[ "$args" == *api/v5/user/repos* ]]; then
 fi
 
 # 可见性校正（PATCH .../repos/{owner}/{repo}）
-#  Gitee:  form  private=true / public=true（等号）
+#  Gitee:  form name=<repo>[&private=true]（公开不传 private）
 #  GitCode: JSON {"private":true} / {"private":false}（冒号）
-if [[ "$args" == *public=true* || "$args" == *private=true* || "$args" == *private=false* \
-   || "$args" == *'"private":true'* || "$args" == *'"private":false'* ]]; then
+# 用 -X PATCH + repos 路径匹配（GET 用 -G、建仓用 user/repos、默认分支已在上方拦截）
+if [[ "$args" == *'-X PATCH'* && "$args" == *api/v5/repos/* ]]; then
   printf '%s\n%s' '{"visibility":"ok"}' "${MOCK_VISIBILITY_CODE:-200}"
   exit 0
 fi
