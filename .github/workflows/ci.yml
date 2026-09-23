@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu = GitHub runner 生产环境; macos = 自带 bash 3.2，验证兼容性
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 语法检查 (bash -n)
+        run: |
+          for f in scripts/*.sh scripts/platforms/*.sh tests/*.sh tests/lib/*.sh tests/mocks/*; do
+            bash -n "$f"
+          done
+          echo "全部语法 OK ($(bash --version | head -1))"
+
+      - name: 单元与集成测试
+        run: bash tests/run.sh
