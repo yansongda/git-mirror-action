@@ -1,0 +1,39 @@
+name: Mirror All Repos
+
+on:
+  schedule:
+    - cron: '0 2 * * *'      # 每日 02:00 UTC 自动同步
+  workflow_dispatch: {}      # 支持在 Actions 页面手动触发
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 引用仓库内的 composite action（自举使用）
+      - name: Mirror to Gitee & GitCode
+        uses: ./
+        with:
+          src_account: yansongda          # TODO: 改为你的 GitHub 用户名/组织名
+          src_token: ${{ secrets.GH_PAT }}
+          src_account_type: user          # user / org
+          blacklist: ''                   # 逗号分隔，不同步的仓库
+          whitelist: ''                   # 逗号分隔，仅同步这些仓库
+          skip_forks: 'true'
+          skip_archived: 'false'
+          dst_private: auto               # auto(跟随源) / true(全部私有) / false(全部公开)
+          concurrency: '4'
+          repo_timeout: '600'
+          dry_run: 'false'
+          debug: 'false'
+        env:
+          # 目标平台：每加一个平台，加两个变量即可（脚本自动发现 DST_*_ACCOUNT）
+          DST_GITEE_ACCOUNT: yansongda   # TODO: 改为你的 Gitee 用户名
+          DST_GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          DST_GITCODE_ACCOUNT: yansongda # TODO: 改为你的 GitCode 用户名
+          DST_GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          MIRROR_KEY: ${{ secrets.MIRROR_PRIVATE_KEY }}
