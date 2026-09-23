@@ -81,12 +81,27 @@
 
 ### 扩展新平台
 
-1. 新增 `scripts/platforms/<name>.sh`，声明两个变量：
-   - `PLATFORM_HOST`：git 推送域名（如 `gitee.com`）
-   - `PLATFORM_API`：API 基址（如 `https://gitee.com/api/v5`）
-2. workflow 中配置 `DST_<NAME>_ACCOUNT` / `DST_<NAME>_TOKEN`（NAME 全大写，如 `DST_GITEE_ACCOUNT`）
-3. 若平台的 API 与 Gitee v5 风格不兼容，可在插件文件中覆盖 `common.sh` 的 `dst_api` 函数（全平台调用自动切换）
-4. 将推送公钥添加到该平台账号
+**最快路径**：复制 `scripts/platforms/_template.sh` 为 `scripts/platforms/<name>.sh`，按注释补齐实现（参照 `gitee.sh` / `gitcode.sh` 范例）。
+
+#### 平台方法契约（全部必选，运行时自动校验，缺失会提示）
+
+| 方法 | 签名 | 语义 |
+|---|---|---|
+| `platform_<name>_host` | `() → host` | SSH 主机名（push URL / known_hosts） |
+| `platform_<name>_repo_exists` | `(owner repo) → 0/1` | 目标仓库是否存在 |
+| `platform_<name>_create_repo` | `(owner repo private) → 0/1` | 建仓（private=true/false） |
+| `platform_<name>_set_visibility` | `(owner repo private) → 0/1` | 校正可见性跟随源 |
+| `platform_<name>_set_default_branch` | `(owner repo branch) → 0/1` | 设置默认分支 |
+| `platform_<name>_api`（可选） | `() → base url` | request 层内部用 |
+
+#### 步骤
+
+1. 新建 `scripts/platforms/<name>.sh`（复制模板），实现上述方法；平台私有 HTTP 层（认证方式、body 格式）自包含在文件内，勿用全局变量（避免多平台互相污染）
+2. workflow 配置 `DST_<NAME>_ACCOUNT` / `DST_<NAME>_TOKEN`（NAME 全大写）
+3. 将推送公钥添加到该平台账号
+4. 运行（dry-run 或同步）——脚本会在启动时自动校验方法是否齐全，缺失会明确列出
+
+> 若平台的 API 与现有平台差异较大（如 GitLab 的 v4 风格），只需在 request 层按该平台规范实现，不影响其他平台。
 
 ## 同步语义与注意事项
 

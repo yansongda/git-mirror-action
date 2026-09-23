@@ -85,44 +85,79 @@ assert_contains "$(printf 'Authorization: token abc123' | sanitize)" 'Authorizat
 t "sanitize 原文无 token 不变"
 assert_eq "hello world" "$(printf 'hello world' | sanitize)"
 
-# ---------- dst_api（mock curl） ----------
+# ---------- 平台操作方法（mock curl；source 平台插件自包含实现） ----------
 export PATH="$PROJECT_ROOT/tests/mocks:$PATH"
 export DST_GITEE_TOKEN=fake DST_GITCODE_TOKEN=fake
+export CURRENT_PLATFORM=gitee
+source "$SCRIPT_DIR/platforms/gitee.sh"
+export CURRENT_PLATFORM=gitcode
+source "$SCRIPT_DIR/platforms/gitcode.sh"
+export CURRENT_PLATFORM=gitee
 
-t "dst_api GET 仓库存在(200)"
-dst_api GET gitee "/repos/test/repo-a"
+# Gitee（form + access_token）
+t "gitee repo_exists 存在(200)"
+platform_gitee_repo_exists test repo-a
 assert_status 0 $?
-assert_eq "200" "$API_CODE"
 
-t "dst_api GET 仓库不存在(404)"
+t "gitee repo_exists 不存在(404)"
 export MOCK_GITEE_EXISTS=false
-dst_api GET gitee "/repos/test/repo-a"
-assert_status 0 $?   # dst_api 只负责请求与状态解析，业务成败由上层函数判断
-assert_eq "404" "$API_CODE"
+platform_gitee_repo_exists test repo-a
+assert_status 1 $?
 unset MOCK_GITEE_EXISTS
 
-t "dst_api POST 建仓(201)"
-dst_api POST gitee "/user/repos" "name=repo-a&private=true"
+t "gitee create_repo 私有传 private=true(201)"
+platform_gitee_create_repo test repo-a true
 assert_status 0 $?
-assert_eq "201" "$API_CODE"
 
-t "dst_api POST 建仓失败(500) 状态解析"
+t "gitee create_repo 失败(500)"
 export MOCK_CREATE_CODE=500
-dst_api POST gitee "/user/repos" "name=repo-a&private=true"
-assert_status 0 $?
-assert_eq "500" "$API_CODE"
+platform_gitee_create_repo test repo-a true
+assert_status 1 $?
 unset MOCK_CREATE_CODE
 
-t "dst_api PATCH 默认分支(200)"
-dst_api PATCH gitcode "/repos/test/repo-a" "default_branch=main"
+t "gitee set_default_branch(200)"
+platform_gitee_set_default_branch test repo-a main
 assert_status 0 $?
-assert_eq "200" "$API_CODE"
 
-t "dst_api PATCH 失败(500) 状态解析"
-export MOCK_PATCH_CODE=500
-dst_api PATCH gitee "/repos/test/repo-a" "default_branch=main"
+# GitCode（JSON body）
+export CURRENT_PLATFORM=gitcode
+t "gitcode create_repo 私有传 JSON private:true(201)"
+platform_gitcode_create_repo test repo-a true
 assert_status 0 $?
-assert_eq "500" "$API_CODE"
-unset MOCK_PATCH_CODE
+
+t "gitcode set_visibility 公开传 JSON private:false(200)"
+platform_gitcode_set_visibility test repo-a false
+assert_status 0 $?
+
+t "gitcode set_visibility 失败(500)"
+export MOCK_VISIBILITY_CODE=500
+platform_gitcode_set_visibility test repo-a true
+assert_status 1 $?
+unset MOCK_VISIBILITY_CODE
+
+t "gitcode set_default_branch(200)"
+platform_gitcode_set_default_branch test repo-a main
+assert_status 0 $?
+
+# 分派: 平台未实现方法时报错
+t "platform_call 未实现方法报错"
+CURRENT_PLATFORM=gitcode
+platform_call no_such_op test repo-a
+assert_status 1 $?
+CURRENT_PLATFORM=gitee
+
+# 平台插件完整性校验
+t "platform_validate 完整平台通过"
+platform_fake_host() { echo fake; }
+platform_fake_repo_exists() { return 0; }
+platform_fake_create_repo() { return 0; }
+platform_fake_set_visibility() { return 0; }
+platform_fake_set_default_branch() { return 0; }
+platform_validate fake
+assert_status 0 $?
+
+-t "platform_validate 缺失方法时报错"
+platform_validate incomplete
+assert_status 1 $?
 
 summary

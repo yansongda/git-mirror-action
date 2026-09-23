@@ -43,13 +43,22 @@ discover_platforms() {
 }
 
 # ---------- 平台插件加载（source platforms/<name>.sh，声明变量 / 可选覆盖 dst_api） ----------
-platform_load() { # platform
-  source "$SCRIPT_DIR/platforms/$1.sh" || return 1
+platform_load() { # platform（加载插件：元数据函数 + 操作方法）
+  local file="$SCRIPT_DIR/platforms/$1.sh"
+  if [[ ! -f "$file" ]]; then
+    log "  [错误] 平台插件文件不存在: platforms/$1.sh"
+    return 1
+  fi
+  source "$file" || { log "  [错误] 平台插件加载失败: platforms/$1.sh"; return 1; }
 }
 
 platform_host() { # platform → host（用于 SSH push URL 与 known_hosts）
-  platform_load "$1" || return 1
-  printf '%s' "$PLATFORM_HOST"
+  local fn="platform_${1}_host"
+  if declare -F "$fn" >/dev/null 2>&1; then
+    "$fn"
+  else
+    echo "$1"
+  fi
 }
 
 # ---------- 目标端可见性计算 ----------
@@ -71,89 +80,45 @@ resolve_private() { # is_private platform → true|false
 
 # ---------- 目标端 API（Gitee v5 风格默认实现；平台插件可覆盖 dst_api 适配异构平台） ----------
 # 用法: dst_api <GET|POST|PATCH> <platform> <path> [data: "k=v&k2=v2"] → API_CODE / API_BODY
-dst_api() {
-  local method="$1" platform="$2" path="$3" data="${4:-}"
-  local base token resp
-  platform_load "$platform" || return 1
-  base="$PLATFORM_API"
-  token=$(platform_token "$platform")
-  local curlargs=(-sS --max-time 60 -w $'\n%{http_code}')
-
-  # JSON body 模式：data 以 { 开头时按 application/json 发送（如 GitCode 的 PATCH/POST）
-  if [[ -n "$data" && "$data" == \{* ]]; then
-    if [[ "$method" == GET ]]; then
-      curlargs+=(-G)
-    else
-      curlargs+=(-X "$method")
-    fi
-    resp=$(curl "${curlargs[@]}" -H "Content-Type: application/json" -d "$data" \
-        "$base$path?access_token=$token") \
-      || { API_CODE="000"; API_BODY="curl 失败"; return 1; }
-  else
-    if [[ "$method" == GET ]]; then
-      curlargs+=(-G)
-    else
-      curlargs+=(-X "$method")
-    fi
-    if [[ -n "$data" ]]; then
-      resp=$(curl "${curlargs[@]}" -d "access_token=$token" -d "$data" "$base$path") \
-        || { API_CODE="000"; API_BODY="curl 失败"; return 1; }
-    else
-      resp=$(curl "${curlargs[@]}" -d "access_token=$token" "$base$path") \
-        || { API_CODE="000"; API_BODY="curl 失败"; return 1; }
-    fi
-  fi
-  API_CODE=$(printf '%s' "$resp" | tail -n1)
-  API_BODY=$(printf '%s' "$resp" | sed '$d')
-}
-
-# ---------- 目标端默认平台操作（基于 v5 API 组合；异构平台可覆盖） ----------
-# 签名统一为 (owner repo [...])，平台取自 CURRENT_PLATFORM（由 platform_call 分派时设置）
-platform_repo_exists() { # owner repo
-  dst_api GET "$CURRENT_PLATFORM" "/repos/$1/$2"
-  [[ $API_CODE == "200" ]]
-}
-
-platform_create_repo() { # owner repo private
-  # 注意: Gitee API 对 private=false 字符串处理有坑（可能被当作 truthy 建私有），
-  # 因此公开仓库不传 private 参数（默认公开），仅私有时显式传 private=true
-  local data="name=$2"
-  [[ "$3" == true ]] && data="$data&private=true"
-  dst_api POST "$CURRENT_PLATFORM" "/user/repos" "$data"
-  [[ $API_CODE == "201" ]]
-}
-
-platform_set_visibility() { # owner repo private
-  # 校正已存在仓库的可见性，使其与源一致（幂等）
-  # 公开: 传 public=true（Gitee 的 public 参数优先级高于 private）
-  # 私有: 传 private=true
-  local data
-  if [[ "$3" == true ]]; then
-    data="private=true"
-  else
-    data="public=true"
-  fi
-  dst_api PATCH "$CURRENT_PLATFORM" "/repos/$1/$2" "$data"
-  [[ $API_CODE == "200" ]]
-}
-
-platform_set_default_branch() { # owner repo branch
-  dst_api PATCH "$CURRENT_PLATFORM" "/repos/$1/$2" "default_branch=$3"
-  [[ $API_CODE == "200" ]]
-}
-
-# ---------- 平台特定实现分派 ----------
-# 平台插件（platforms/<name>.sh）可定义 platform_<name>_<op> 覆盖默认实现
-# （如 GitCode 的 boolean 用 1/0 而非 true/false）
+# ---------- 平台操作分派 ----------
+# 平台插件（platforms/<name>.sh）必须自包含实现 platform_<name>_<op> 方法
+# （含平台私有的 HTTP 层），common.sh 不提供任何平台 API 实现
 # 用法: platform_call <op> <args...>  需先设置 CURRENT_PLATFORM
+# 约定签名（各平台统一）: repo_exists <owner> <repo>
+#                        create_repo <owner> <repo> <private>
+#                        set_visibility <owner> <repo> <private>
+#                        set_default_branch <owner> <repo> <branch>
 platform_call() {
   local op="$1"; shift
   local fn="platform_${CURRENT_PLATFORM:-}_${op}"
-  if declare -F "$fn" >/dev/null 2>&1; then
-    "$fn" "$@"
-  else
-    "platform_${op}" "$@"
+  if ! declare -F "$fn" >/dev/null 2>&1; then
+    log "  [错误] 平台 $CURRENT_PLATFORM 未实现 $op 方法（插件不完整）"
+    return 1
   fi
+  "$fn" "$@"
+}
+
+# ---------- 平台插件完整性校验 ----------
+# 新增平台时，按方法契约实现以下方法（缺失会在此一次性列出）:
+#   platform_<name>_host                 → echo SSH 主机名
+#   platform_<name>_repo_exists o r      → 仓库是否存在
+#   platform_<name>_create_repo o r priv → 建仓
+#   platform_<name>_set_visibility o r priv
+#   platform_<name>_set_default_branch o r branch
+# 模板参照 scripts/platforms/_template.sh
+platform_validate() { # platform
+  local p="$1" op fn
+  local missing=()
+  for op in host repo_exists create_repo set_visibility set_default_branch; do
+    fn="platform_${p}_${op}"
+    declare -F "$fn" >/dev/null 2>&1 || missing+=("$fn")
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    log "  [错误] 平台 $p 插件不完整，缺少方法: ${missing[*]}"
+    log "          参照 scripts/platforms/_template.sh 补齐后重试"
+    return 1
+  fi
+  return 0
 }
 
 # ---------- 源端 HTTPS 认证（GIT_ASKPASS + basic auth） ----------

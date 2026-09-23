@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# core.sh 单元测试（sync_one 同步核心）
+# sync-one.sh 单测（sync_one 函数，经 source 加载）
 # 使用 fake 仓库 + mock git/curl，全离线
 # ============================================================
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -10,7 +10,7 @@ source "$PROJECT_ROOT/tests/lib/assert.sh"
 source "$PROJECT_ROOT/tests/lib/env.sh"
 export SCRIPT_DIR="$PROJECT_ROOT/scripts"
 source "$SCRIPT_DIR/common.sh"
-source "$SCRIPT_DIR/core.sh"
+source "$SCRIPT_DIR/sync-one.sh"   # 被 source 时仅加载 sync_one 函数
 
 FAKE_ROOT=/tmp/git-mirror-test-core
 rm -rf "$FAKE_ROOT"

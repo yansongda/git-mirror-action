@@ -36,9 +36,10 @@ if [[ "$args" == *api/v5/user/repos* ]]; then
 fi
 
 # 可见性校正（PATCH .../repos/{owner}/{repo}）
-#  Gitee:  form public=true / private=true
-#  GitCode: JSON {"private":true} / {"private":false}
-if [[ "$args" == *public=true* || "$args" == *private=true* || "$args" == *private=false* ]]; then
+#  Gitee:  form  private=true / public=true（等号）
+#  GitCode: JSON {"private":true} / {"private":false}（冒号）
+if [[ "$args" == *public=true* || "$args" == *private=true* || "$args" == *private=false* \
+   || "$args" == *'"private":true'* || "$args" == *'"private":false'* ]]; then
   printf '%s\n%s' '{"visibility":"ok"}' "${MOCK_VISIBILITY_CODE:-200}"
   exit 0
 fi
