@@ -22,10 +22,11 @@ sync_one() {
     "https://github.com/$SRC_ACCOUNT/$repo.git" "$WORK_DIR/$repo.git" >/dev/null 2>&1
   log "  clone 完成"
 
-  # 2. 空仓库（无任何分支/tag）跳过推送
+  # 2. 空仓库（无任何分支/tag）标记：仍建仓，但不推送
+  local is_empty=false
   if ! git --git-dir="$WORK_DIR/$repo.git" show-ref --quiet 2>/dev/null; then
-    log "  空仓库，跳过推送"
-    return 0
+    is_empty=true
+    log "  空仓库（无分支/tag），仅建仓不推送"
   fi
 
   # 3. 逐个目标平台
@@ -48,7 +49,13 @@ sync_one() {
       continue
     fi
 
-    # 3b. 增量推送（--mirror: 只推变化 + 删除目标端多余分支/tag）
+    # 3b. 空仓库不推送
+    if [[ "$is_empty" == true ]]; then
+      log "    空仓库，跳过推送"
+      continue
+    fi
+
+    # 3c. 增量推送（--mirror: 只推变化 + 删除目标端多余分支/tag）
     if ! _timeout git --git-dir="$WORK_DIR/$repo.git" push --mirror \
         "git@$(platform_host "$p"):$acct/$repo.git" 2>&1 | sanitize; then
       log "    push 失败，重试一次..."
@@ -60,7 +67,7 @@ sync_one() {
     fi
     log "    push 完成"
 
-    # 3c. 修正目标端默认分支（mirror push 不携带远端 HEAD）
+    # 3d. 修正目标端默认分支（mirror push 不携带远端 HEAD）
     if platform_set_default_branch "$p" "$acct" "$repo" "$def_branch"; then
       log "    默认分支已设为 $def_branch"
     else

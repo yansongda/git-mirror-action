@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# ============================================================
+# mock curl：模拟 GitHub / Gitee / GitCode API 响应
+# 行为由环境变量控制：
+#   MOCK_GH_REPOS_JSON / MOCK_GH_PAGE2_JSON / MOCK_GH_CODE
+#   MOCK_GITEE_EXISTS / MOCK_GITCODE_EXISTS (true|false)
+#   MOCK_CREATE_CODE / MOCK_PATCH_CODE
+# ============================================================
+args="$*"
+
+# GitHub 仓库列表（user 与 org）
+if [[ "$args" == *api.github.com/user/repos* || "$args" == *api.github.com/orgs/*repos* ]]; then
+  if [[ "$args" == *page=2* && -n "${MOCK_GH_PAGE2_JSON:-}" ]]; then
+    printf '%s\n%s' "$MOCK_GH_PAGE2_JSON" "${MOCK_GH_CODE:-200}"
+  else
+    printf '%s\n%s' "${MOCK_GH_REPOS_JSON:-[]}" "${MOCK_GH_CODE:-200}"
+  fi
+  exit 0
+fi
+
+# 设置默认分支（PATCH .../repos/{owner}/{repo}）
+if [[ "$args" == *default_branch* ]]; then
+  printf '%s\n%s' '{"default_branch":"main"}' "${MOCK_PATCH_CODE:-200}"
+  exit 0
+fi
+
+# 建仓（POST .../user/repos）
+if [[ "$args" == *api/v5/user/repos* ]]; then
+  printf '%s\n%s' '{"id":3}' "${MOCK_CREATE_CODE:-201}"
+  exit 0
+fi
+
+# 仓库存在检查（GET .../repos/{owner}/{repo}）
+if [[ "$args" == *gitee.com/api/v5/repos/* ]]; then
+  if [[ "${MOCK_GITEE_EXISTS:-true}" == true ]]; then
+    printf '%s\n%s' '{"id":1,"full_name":"x/y"}' "200"
+  else
+    printf '%s\n%s' '{"message":"仓库不存在"}' "404"
+  fi
+  exit 0
+fi
+if [[ "$args" == *gitcode.com/api/v5/repos/* ]]; then
+  if [[ "${MOCK_GITCODE_EXISTS:-false}" == true ]]; then
+    printf '%s\n%s' '{"id":1,"full_name":"x/y"}' "200"
+  else
+    printf '%s\n%s' '{"message":"仓库不存在"}' "404"
+  fi
+  exit 0
+fi
+
+printf '%s\n%s' '{"message":"not found"}' "404"

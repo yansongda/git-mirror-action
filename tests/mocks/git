@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# ============================================================
+# mock git：把远程 URL 重写为本地 fake 仓库路径，实现离线测试
+# 环境变量:
+#   MOCK_GH_DIR / MOCK_GITEE_DIR / MOCK_GITCODE_DIR（fake 仓库根目录）
+#   MOCK_FAIL_PUSH=true + MOCK_FAIL_MARKER=<文件>：首次 push 失败（测重试）
+# ============================================================
+real_git=$(env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin command -v git)
+args=("$@")
+
+# 模拟首次 push 失败（重试路径测试）
+if [[ "${MOCK_FAIL_PUSH:-}" == true && " ${args[*]} " == *" push "* ]]; then
+  if [[ ! -f "${MOCK_FAIL_MARKER:-}" ]]; then
+    : > "${MOCK_FAIL_MARKER:-/dev/null}" 2>/dev/null || true
+    echo "mock: 模拟首次 push 失败" >&2
+    exit 1
+  fi
+fi
+
+for i in "${!args[@]}"; do
+  case "${args[$i]}" in
+    https://github.com/*) args[$i]="${MOCK_GH_DIR}/${args[$i]#https://github.com/}" ;;
+    git@gitee.com:*)     args[$i]="${MOCK_GITEE_DIR}/${args[$i]#git@gitee.com:}" ;;
+    git@gitcode.com:*)   args[$i]="${MOCK_GITCODE_DIR}/${args[$i]#git@gitcode.com:}" ;;
+  esac
+done
+
+exec "$real_git" "${args[@]}"
