@@ -1,8 +1,5 @@
-name: Git Mirror Action
-description: >-
-  Mirror all GitHub repos of a user or organization (including private ones)
-  to Gitee / GitCode and other git platforms. Zero third-party action
-  dependencies: only bash / git / curl / jq / ssh that ship with the runner.
+name: Git Mirror
+description: 'Mirror all GitHub repos of a user or organization (including private ones) to Gitee / GitCode and other git platforms.'
 author: yansongda
 branding:
   icon: repeat
