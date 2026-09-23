@@ -228,7 +228,7 @@ platform_fake_set_default_branch() { return 0; }
 platform_validate fake
 assert_status 0 $?
 
--t "platform_validate 缺失方法时报错"
+t "platform_validate 缺失方法时报错"
 platform_validate incomplete
 assert_status 1 $?
 

@@ -4,7 +4,7 @@
 # 主流程见 main()，各步骤拆分为单一职责函数：
 #   load_config → validate_config → setup_platforms → prepare_workdir
 #   → print_banner → fetch_repos → filter_repos
-#   → dry_run_mode | (sync_all + summarize)
+#   → dry_run_mode | (sync_all + summarize + final_summary)
 # 单仓库同步逻辑见 core.sh（每仓库一个独立进程）
 # ============================================================
 set -euo pipefail

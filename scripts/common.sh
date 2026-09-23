@@ -2,7 +2,7 @@
 # ============================================================
 # git-mirror-action 通用基础库（幂等，可重复 source）
 # 包含: 日志/脱敏/超时/列表判断/平台发现与账号读取/可见性计算/
-#       SSH 初始化/目标端 API 封装与默认平台操作
+#       平台插件加载/分派/校验 + 认证与 SSH 初始化
 # 需要环境变量: SCRIPT_DIR（平台插件目录定位）
 # ============================================================
 
@@ -29,7 +29,7 @@ mask_repo() { # <repo> <is_private:true|false> → 日志显示名
 }
 
 # ---------- 错误文本内私有仓库名脱敏（URL / API body 中的仓库名替换为显示名） ----------
-# 需先经 mask_repo 得到显示名；公开仓库（显示名==原名）直接原样返回
+# 私有仓库名经 mask_repo 得到显示名后替换；公开仓库（显示名==原名）直接原样返回
 redact_repo() { # <text> <owner> <repo> → 替换后的文本
   local text="$1" owner="$2" repo="$3" shown
   shown=$(mask_repo "$repo" "${REPO_MASK_PRIVATE:-false}")
@@ -66,7 +66,7 @@ discover_platforms() {
   env | sed -n 's/^DST_\([A-Z0-9_]*\)_ACCOUNT=.*/\1/p' | sort -u | tr 'A-Z' 'a-z'
 }
 
-# ---------- 平台插件加载（source platforms/<name>.sh，声明变量 / 可选覆盖 dst_api） ----------
+# ---------- 平台插件加载（source platforms/<name>.sh，自包含实现） ----------
 platform_load() { # platform（加载插件：元数据函数 + 操作方法）
   local file="$SCRIPT_DIR/platforms/$1.sh"
   if [[ ! -f "$file" ]]; then
@@ -102,8 +102,6 @@ resolve_private() { # is_private platform → true|false
   esac
 }
 
-# ---------- 目标端 API（Gitee v5 风格默认实现；平台插件可覆盖 dst_api 适配异构平台） ----------
-# 用法: dst_api <GET|POST|PATCH> <platform> <path> [data: "k=v&k2=v2"] → API_CODE / API_BODY
 # ---------- 平台操作分派 ----------
 # 平台插件（platforms/<name>.sh）必须自包含实现 platform_<name>_<op> 方法
 # （含平台私有的 HTTP 层），common.sh 不提供任何平台 API 实现

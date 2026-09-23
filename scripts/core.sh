@@ -108,7 +108,7 @@ sync_to_platform() { # <platform> <repo> <is_private> <def_branch> <is_empty> �
     return 0
   fi
 
-  # 增量推送（--mirror: 只推变化 + 删除目标端多余分支/tag）
+  # 增量推送（--prune + 显式 refs/heads,tags：只推变化 + 删除目标端多余分支/tag）
   if ! mirror_push "$acct" "$repo"; then
     return 1
   fi
