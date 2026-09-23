@@ -13,10 +13,9 @@
 │         ▼                                                    │
 │  scripts/                                                     │
 │  ├── mirror.sh   # 编排：校验/列仓库/过滤/并发调度/汇总        │
-│  ├── sync-one.sh # 单仓库同步进程（每仓一进程，可单独调试）    │
+│  ├── core.sh     # 同步核心（每仓一进程）：clone→建仓→push→默认分支  │
 │  ├── common.sh   # 通用基础：日志/脱敏/API/平台发现/SSH        │
 │  ├── gh.sh       # GitHub 源端：仓库列表获取                  │
-│  ├── core.sh     # 同步核心：clone→建仓→push→默认分支        │
 │  └── platforms/  # 平台插件（加平台=加文件+2个环境变量）      │
 │      ├── gitee.sh    #  PLATFORM_HOST / PLATFORM_API          │
 │      └── gitcode.sh  #                                        │
@@ -129,7 +128,7 @@
 bash -n scripts/*.sh scripts/platforms/*.sh
 
 # 单仓库同步进程可独立运行调试:
-bash scripts/sync-one.sh <repo> <is_private> <default_branch>
+bash scripts/core.sh <repo> <is_private> <default_branch>
 
 # dry-run（不推送，需准备环境变量与真实 token）
 SRC_ACCOUNT=yourname SRC_TOKEN=xxx \

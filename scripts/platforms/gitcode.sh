@@ -34,7 +34,7 @@ platform_gitcode_request() {
   API_BODY=$(printf '%s' "$resp" | sed '$d')
 }
 
-# ---------- 操作方法（sync-one.sh 经 platform_call 分派调用，签名统一） ----------
+# ---------- 操作方法（core.sh 经 platform_call 分派调用，签名统一） ----------
 platform_gitcode_repo_exists() { # owner repo
   platform_gitcode_request GET "/repos/$1/$2"
   [[ $API_CODE == "200" ]]

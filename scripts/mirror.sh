@@ -5,7 +5,7 @@
 #   load_config → validate_config → setup_platforms → prepare_workdir
 #   → print_banner → fetch_repos → filter_repos
 #   → dry_run_mode | (sync_all + summarize)
-# 单仓库同步逻辑见 sync-one.sh（每仓库一个独立进程）
+# 单仓库同步逻辑见 core.sh（每仓库一个独立进程）
 # ============================================================
 set -euo pipefail
 
@@ -132,11 +132,11 @@ dry_run_mode() {
   log "DRY RUN 完成"
 }
 
-# ---------- 并发同步（每仓库一个 sync-one.sh 进程） ----------
+# ---------- 并发同步（每仓库一个 core.sh 进程） ----------
 sync_all() {
   export SCRIPT_DIR WORK_DIR SRC_ACCOUNT SRC_TOKEN REPO_TIMEOUT DST_PRIVATE DEBUG
   log "开始同步（并发 ${CONCURRENCY}）..."
-  xargs -P "$CONCURRENCY" -n 3 bash "$SCRIPT_DIR/sync-one.sh" < "$WORK_DIR/final.tsv"
+  xargs -P "$CONCURRENCY" -n 3 bash "$SCRIPT_DIR/core.sh" < "$WORK_DIR/final.tsv"
 }
 
 # ---------- 汇总结果，有失败则退出非零 ----------

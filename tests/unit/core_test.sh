@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # ============================================================
-# sync-one.sh 单测（sync_one 函数，经 source 加载）
+# core.sh 单测（sync_one 函数，经 source 加载）
 # 使用 fake 仓库 + mock git/curl，全离线
 # ============================================================
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PROJECT_ROOT
-set -uo pipefail   # 与 sync-one.sh 一致：管道失败需真实传播
+set -uo pipefail   # 与 core.sh 一致：管道失败需真实传播
 source "$PROJECT_ROOT/tests/lib/assert.sh"
 source "$PROJECT_ROOT/tests/lib/env.sh"
 export SCRIPT_DIR="$PROJECT_ROOT/scripts"
 source "$SCRIPT_DIR/common.sh"
-source "$SCRIPT_DIR/sync-one.sh"   # 被 source 时仅加载 sync_one 函数
+source "$SCRIPT_DIR/core.sh"   # 被 source 时仅加载 sync_one 函数
 
 FAKE_ROOT=/tmp/git-mirror-test-core
 rm -rf "$FAKE_ROOT"
@@ -90,7 +90,7 @@ mkdir -p "$MOCK_GITEE_DIR/test"
 git init --bare "$MOCK_GITEE_DIR/test/repo-a.git" -q
 ( set -e; sync_one repo-a true main ) >"$WORK_DIR/retry.log" 2>&1
 assert_status 0 $?
-assert_file_contains "$WORK_DIR/retry.log" "重试一次"
+assert_file_contains "$WORK_DIR/retry.log" "第 1 次"
 assert_file_contains "$WORK_DIR/retry.log" "push 完成"
 unset MOCK_FAIL_PUSH MOCK_FAIL_MARKER
 rm -rf "$WORK_DIR/repo-a.git"
