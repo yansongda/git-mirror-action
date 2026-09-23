@@ -52,13 +52,20 @@ sync_one() {
       continue
     fi
 
-    # 3b. 空仓库不推送
+    # 3b. 校正可见性（跟随源，可修复历史误建为私有的公开仓库）
+    if platform_set_visibility "$p" "$acct" "$repo" "$priv"; then
+      log "    可见性校正为 $([ "$priv" == true ] && echo private || echo public)"
+    else
+      log "    [warn] 校正可见性失败 (HTTP $API_CODE)"
+    fi
+
+    # 3c. 空仓库不推送
     if [[ "$is_empty" == true ]]; then
       log "    空仓库，跳过推送"
       continue
     fi
 
-    # 3c. 增量推送（--mirror: 只推变化 + 删除目标端多余分支/tag）
+    # 3d. 增量推送（--mirror: 只推变化 + 删除目标端多余分支/tag）
     if ! push_out=$(_timeout git --git-dir="$WORK_DIR/$repo.git" push --mirror \
         "git@$(platform_host "$p"):$acct/$repo.git" 2>&1); then
       log "    [错误] push 失败（$(printf '%s' "$push_out" | sanitize | tail -2 | tr '\n' ' ')，重试一次..."
@@ -70,7 +77,7 @@ sync_one() {
     fi
     log "    push 完成"
 
-    # 3d. 修正目标端默认分支（mirror push 不携带远端 HEAD）
+    # 3e. 修正目标端默认分支（mirror push 不携带远端 HEAD）
     if platform_set_default_branch "$p" "$acct" "$repo" "$def_branch"; then
       log "    默认分支已设为 $def_branch"
     else

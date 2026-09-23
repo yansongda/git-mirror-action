@@ -101,8 +101,26 @@ platform_repo_exists() { # platform owner repo
 }
 
 platform_create_repo() { # platform owner repo private
-  dst_api POST "$1" "/user/repos" "name=$3&private=$4"
+  # 注意: Gitee API 对 private=false 字符串处理有坑（可能被当作 truthy 建私有），
+  # 因此公开仓库不传 private 参数（默认公开），仅私有时显式传 private=true
+  local data="name=$3"
+  [[ "$4" == true ]] && data="$data&private=true"
+  dst_api POST "$1" "/user/repos" "$data"
   [[ $API_CODE == "201" ]]
+}
+
+platform_set_visibility() { # platform owner repo private
+  # 校正已存在仓库的可见性，使其与源一致（幂等）
+  # 公开: 传 public=true（Gitee 的 public 参数优先级高于 private）
+  # 私有: 传 private=true
+  local data
+  if [[ "$4" == true ]]; then
+    data="private=true"
+  else
+    data="public=true"
+  fi
+  dst_api PATCH "$1" "/repos/$2/$3" "$data"
+  [[ $API_CODE == "200" ]]
 }
 
 platform_set_default_branch() { # platform owner repo branch

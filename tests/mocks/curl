@@ -8,6 +8,11 @@
 # ============================================================
 args="$*"
 
+# 可选: 记录请求参数到文件（测试断言用）
+if [[ -n "${MOCK_LOG_FILE:-}" ]]; then
+  echo "$args" >> "$MOCK_LOG_FILE"
+fi
+
 # GitHub 仓库列表（user 与 org）
 if [[ "$args" == *api.github.com/user/repos* || "$args" == *api.github.com/orgs/*repos* ]]; then
   if [[ "$args" == *page=2* && -n "${MOCK_GH_PAGE2_JSON:-}" ]]; then
@@ -27,6 +32,12 @@ fi
 # 建仓（POST .../user/repos）
 if [[ "$args" == *api/v5/user/repos* ]]; then
   printf '%s\n%s' '{"id":3}' "${MOCK_CREATE_CODE:-201}"
+  exit 0
+fi
+
+# 可见性校正（PATCH .../repos/{owner}/{repo}，data 含 public=true / private=true）
+if [[ "$args" == *public=true* || "$args" == *private=true* ]]; then
+  printf '%s\n%s' '{"visibility":"ok"}' "${MOCK_VISIBILITY_CODE:-200}"
   exit 0
 fi
 
