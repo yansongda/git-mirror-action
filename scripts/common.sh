@@ -162,10 +162,10 @@ EOF
 
 # ---------- SSH 初始化（推送密钥 + 固定 known_hosts 防中间人） ----------
 init_ssh() {
-  [[ -n "${MIRROR_KEY:-}" ]] || return 0
+  [[ -n "${MIRROR_PRIVATE_KEY:-}" ]] || return 0
   mkdir -p "$HOME/.ssh"
   chmod 700 "$HOME/.ssh"
-  printf '%s\n' "$MIRROR_KEY" > "$HOME/.ssh/id_mirror"
+  printf '%s\n' "$MIRROR_PRIVATE_KEY" > "$HOME/.ssh/id_mirror"
   chmod 600 "$HOME/.ssh/id_mirror"
   : > "$HOME/.ssh/known_hosts"
   local p h

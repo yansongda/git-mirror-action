@@ -76,7 +76,7 @@
 | `DST_GITEE_ACCOUNT` / `DST_GITEE_TOKEN` | Gitee 账号 + API token |
 | `DST_GITCODE_ACCOUNT` / `DST_GITCODE_TOKEN` | GitCode 账号 + API token |
 | `DST_<PLATFORM>_PRIVATE`（可选） | 平台级可见性覆盖，如 `DST_GITEE_PRIVATE=true`，优先级高于 `dst_private` |
-| `MIRROR_KEY` | SSH 私钥（所有平台推送共用），公钥须已添加到各目标端账号 |
+| `MIRROR_PRIVATE_KEY` | SSH 私钥（所有平台推送共用），公钥须已添加到各目标端账号；即 Secrets 中的 `MIRROR_PRIVATE_KEY` |
 
 ### 扩展新平台
 

@@ -15,7 +15,7 @@ export SRC_ACCOUNT=test SRC_TOKEN=fake SRC_ACCOUNT_TYPE=user
 export DST_PRIVATE=auto CONCURRENCY=2 REPO_TIMEOUT=60
 export DST_GITEE_ACCOUNT=test DST_GITEE_TOKEN=fake
 export DST_GITCODE_ACCOUNT=test DST_GITCODE_TOKEN=fake
-export MIRROR_KEY=unused WORK_DIR="$FAKE_ROOT/workdir"
+export MIRROR_PRIVATE_KEY=unused WORK_DIR="$FAKE_ROOT/workdir"
 
 # GitHub 返回 4 个仓库: 私有/公开/黑名单/fork
 export MOCK_GH_REPOS_JSON='[{"name":"private-repo","private":true,"fork":false,"archived":false,"default_branch":"main"},{"name":"public-repo","private":false,"fork":false,"archived":false,"default_branch":"main"},{"name":"black-repo","private":false,"fork":false,"archived":false,"default_branch":"main"},{"name":"fork-repo","private":false,"fork":true,"archived":false,"default_branch":"main"}]'
@@ -28,7 +28,7 @@ BLACKLIST=black-repo WHITELIST= SKIP_FORKS=true SKIP_ARCHIVED=false \
 DST_PRIVATE=auto CONCURRENCY=2 REPO_TIMEOUT=60 DRY_RUN=true DEBUG=false \
 DST_GITEE_ACCOUNT=test DST_GITEE_TOKEN=fake \
 DST_GITCODE_ACCOUNT=test DST_GITCODE_TOKEN=fake \
-MIRROR_KEY=unused WORK_DIR=$FAKE_ROOT/workdir \
+MIRROR_PRIVATE_KEY=unused WORK_DIR=$FAKE_ROOT/workdir \
 bash $PROJECT_ROOT/scripts/mirror.sh"
 
 out=$($RUN)

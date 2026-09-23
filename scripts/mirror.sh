@@ -29,7 +29,7 @@ load_config() {
   REPO_TIMEOUT="${REPO_TIMEOUT:-600}"
   DRY_RUN="${DRY_RUN:-false}"
   DEBUG="${DEBUG:-false}"
-  MIRROR_KEY="${MIRROR_KEY:-}"
+  MIRROR_PRIVATE_KEY="${MIRROR_PRIVATE_KEY:-}"
   WORK_DIR="${WORK_DIR:-${RUNNER_TEMP:-/tmp}/git-mirror}"
 }
 
@@ -60,7 +60,7 @@ setup_platforms() {
     platform_validate "$p" || die "平台插件不完整: $p（参照 scripts/platforms/_template.sh 补齐）"
   done
   if [[ "$DRY_RUN" != true ]]; then
-    [[ -n "$MIRROR_KEY" ]] || die "MIRROR_KEY 不能为空（推送用 SSH 私钥；dry_run 模式除外）"
+    [[ -n "$MIRROR_PRIVATE_KEY" ]] || die "MIRROR_PRIVATE_KEY 不能为空（推送用 SSH 私钥；dry_run 模式除外）"
   fi
 }
 

@@ -17,7 +17,7 @@ export SRC_ACCOUNT=test SRC_TOKEN=fake SRC_ACCOUNT_TYPE=user
 export DST_PRIVATE=auto CONCURRENCY=2 REPO_TIMEOUT=120
 export DST_GITEE_ACCOUNT=test DST_GITEE_TOKEN=fake
 export DST_GITCODE_ACCOUNT=test DST_GITCODE_TOKEN=fake
-export MIRROR_KEY=fake-key
+export MIRROR_PRIVATE_KEY=fake-key
 
 # ---------- 场景1: 全部成功 ----------
 make_source_repo repo-a main
@@ -35,7 +35,7 @@ out=$(env PATH=$PROJECT_ROOT/tests/mocks:$PATH HOME=$FAKE_ROOT/home \
   DST_PRIVATE=auto CONCURRENCY=2 REPO_TIMEOUT=120 DRY_RUN=false DEBUG=false \
   DST_GITEE_ACCOUNT=test DST_GITEE_TOKEN=fake \
   DST_GITCODE_ACCOUNT=test DST_GITCODE_TOKEN=fake \
-  MIRROR_KEY=fake-key WORK_DIR=$WORK_DIR \
+  MIRROR_PRIVATE_KEY=fake-key WORK_DIR=$WORK_DIR \
   bash $PROJECT_ROOT/scripts/mirror.sh)
 rc=$?
 
@@ -59,7 +59,7 @@ out=$(env PATH=$PROJECT_ROOT/tests/mocks:$PATH HOME=$FAKE_ROOT/home \
   DST_PRIVATE=auto CONCURRENCY=2 REPO_TIMEOUT=120 DRY_RUN=false DEBUG=false \
   DST_GITEE_ACCOUNT=test DST_GITEE_TOKEN=fake \
   DST_GITCODE_ACCOUNT=test DST_GITCODE_TOKEN=fake \
-  MIRROR_KEY=fake-key WORK_DIR=$WORK_DIR \
+  MIRROR_PRIVATE_KEY=fake-key WORK_DIR=$WORK_DIR \
   bash $PROJECT_ROOT/scripts/mirror.sh)
 rc=$?
 
@@ -88,7 +88,7 @@ out=$(env PATH=$PROJECT_ROOT/tests/mocks:$PATH HOME=$FAKE_ROOT/home \
   DST_PRIVATE=auto CONCURRENCY=2 REPO_TIMEOUT=120 DRY_RUN=false DEBUG=false \
   DST_GITEE_ACCOUNT=test DST_GITEE_TOKEN=fake \
   DST_GITCODE_ACCOUNT=test DST_GITCODE_TOKEN=fake \
-  MIRROR_KEY=fake-key WORK_DIR=$FAKE_ROOT/workdir-priv \
+  MIRROR_PRIVATE_KEY=fake-key WORK_DIR=$FAKE_ROOT/workdir-priv \
   bash $PROJECT_ROOT/scripts/mirror.sh)
 rc=$?
 t "场景3: 私有仓库在最终汇总中脱敏"

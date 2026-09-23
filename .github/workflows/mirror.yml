@@ -36,4 +36,4 @@ jobs:
           DST_GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           DST_GITCODE_ACCOUNT: yansongda # TODO: 改为你的 GitCode 用户名
           DST_GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-          MIRROR_KEY: ${{ secrets.MIRROR_PRIVATE_KEY }}
+          MIRROR_PRIVATE_KEY: ${{ secrets.MIRROR_PRIVATE_KEY }}
