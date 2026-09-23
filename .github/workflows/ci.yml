@@ -18,7 +18,7 @@ jobs:
         # ubuntu = GitHub runner 生产环境; macos = 自带 bash 3.2，验证兼容性
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 语法检查 (bash -n)
         run: |

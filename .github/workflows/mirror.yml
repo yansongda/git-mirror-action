@@ -12,7 +12,7 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # 引用仓库内的 composite action（自举使用）
       - name: Mirror to Gitee & GitCode

@@ -5,7 +5,9 @@
 #   MOCK_GH_DIR / MOCK_GITEE_DIR / MOCK_GITCODE_DIR（fake 仓库根目录）
 #   MOCK_FAIL_PUSH=true + MOCK_FAIL_MARKER=<文件>：首次 push 失败（测重试）
 # ============================================================
-real_git=$(env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin command -v git)
+real_git=/usr/bin/git
+# 注: 不用 `command -v`——它是 shell 内建，Ubuntu /usr/bin 下无对应可执行文件
+# 且 PATH 中 mock 自身会干扰解析；/usr/bin/git 在 GitHub runner 与 macOS 均为标准路径
 args=("$@")
 
 # 模拟首次 push 失败（重试路径测试）
