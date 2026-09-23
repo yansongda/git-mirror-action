@@ -42,7 +42,7 @@ assert_file_contains "$WORK_DIR/sync.log" "可见性校正为 private"   # 源�
 assert_contains "$(grep 'gitcode.com/api/v5/user/repos' "$MOCK_LOG_FILE")" '"private":true'
 unset MOCK_LOG_FILE
 
-# ---------- 公开仓库: 建仓参数不传 private=false、校正 gitee 传 name(必填) 不传 private ----------
+# ---------- 公开仓库: 建仓参数不传 private=false、校正 gitee 显式传 private=false ----------
 t "sync_one 公开仓库建仓参数与可见性校正"
 make_source_repo repo-pub main
 make_empty_dest "$MOCK_GITEE_DIR/test" repo-pub
@@ -54,9 +54,8 @@ assert_status 0 $?
 # gitcode 不存在 → 建仓；建仓请求（user/repos）JSON 不得含 private 字段（公开默认）
 create_line=$(grep 'user/repos' "$MOCK_LOG_FILE" | head -1)
 assert_not_contains "$create_line" "private"
-# 可见性校正: gitee 传 name=<repo>(必填) 且不传 private + gitcode JSON private:false
-assert_contains "$(grep -F 'gitee.com/api/v5/repos/' "$MOCK_LOG_FILE" | grep -- '-X PATCH' | head -1)" "name=repo-pub"
-assert_not_contains "$(grep -F 'gitee.com/api/v5/repos/' "$MOCK_LOG_FILE" | grep -- '-X PATCH' | head -1)" "private"
+# 可见性校正: gitee 显式传 private=false + gitcode JSON private:false
+assert_contains "$(grep -F 'gitee.com/api/v5/repos/' "$MOCK_LOG_FILE" | grep -- '-X PATCH' | head -1)" "name=repo-pub&private=false"
 assert_contains "$(cat "$MOCK_LOG_FILE")" '"private":false'
 assert_file_contains "$WORK_DIR/pub.log" "可见性校正为 public"
 unset MOCK_LOG_FILE

@@ -57,11 +57,10 @@ platform_gitee_create_repo() { # owner repo private
 }
 
 platform_gitee_set_visibility() { # owner repo private
-  # Gitee PATCH 更新仓库: name 为必填参数；该接口仅支持 private，无 public 参数
-  # 私有: private=true；公开: 不传 private（Gitee 对 private=false 字符串处理有坑，
-  #       可能被当 truthy 转私有；接口也无 public 参数可用，故公开保持现状）
-  local data="name=$2"
-  [[ "$3" == true ]] && data="$data&private=true"
+  # Gitee PATCH 更新仓库: name 为必填参数；private 必须显式传 true/false
+  # 公开必须传 private=false 才能把已误建为私有的仓库改回公开
+  # （注意: 建仓 POST 对 private=false 字符串有坑才不传；PATCH 更新接口实测有效）
+  local data="name=$2&private=$3"
   platform_gitee_request PATCH "/repos/$1/$2" "$data"
   [[ $API_CODE == "200" ]]
 }

@@ -164,6 +164,20 @@ assert_contains "$(cat "$MOCK_LOG_FILE")" "name=repo-a"
 assert_contains "$(cat "$MOCK_LOG_FILE")" "default_branch=main"
 unset MOCK_LOG_FILE
 
+t "gitee set_visibility 私有显式传 private=true"
+export MOCK_LOG_FILE="/tmp/gitee-vis.log"; rm -f "$MOCK_LOG_FILE"
+platform_gitee_set_visibility test repo-a true
+assert_status 0 $?
+assert_contains "$(cat "$MOCK_LOG_FILE")" "name=repo-a&private=true"
+unset MOCK_LOG_FILE
+
+t "gitee set_visibility 公开显式传 private=false（修复误建私有）"
+export MOCK_LOG_FILE="/tmp/gitee-vis2.log"; rm -f "$MOCK_LOG_FILE"
+platform_gitee_set_visibility test repo-a false
+assert_status 0 $?
+assert_contains "$(cat "$MOCK_LOG_FILE")" "name=repo-a&private=false"
+unset MOCK_LOG_FILE
+
 # GitCode（JSON body）
 export CURRENT_PLATFORM=gitcode
 t "gitcode create_repo 私有传 JSON private:true(201)"
