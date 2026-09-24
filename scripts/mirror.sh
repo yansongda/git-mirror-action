@@ -162,16 +162,21 @@ summarize() {
 
 # ---------- 最终汇总（逐仓库成败 + 耗时一览表，结尾输出） ----------
 final_summary() {
-  local ok_n=0 fail_n=0 shown r priv st dur
+  local ok_n=0 fail_n=0 shown r priv st dur fp
   log "===== 最终汇总 ====="
   if [[ ! -f "$WORK_DIR/status/results.tsv" ]]; then
     log "  无同步记录"
     return
   fi
-  while IFS=$'\t' read -r r priv st dur; do
+  while IFS=$'\t' read -r r priv st dur fp; do
     shown=$(mask_repo "$r" "$priv")
     if [[ "$st" == ok ]]; then
-      printf '  [ OK ]  %-30s %4ss\n' "$shown" "$dur"
+      printf '  [ OK ]  %-30s %4ss' "$shown" "$dur"
+      # 第 5 列 = 平台级失败明细（仓库 OK 但某平台失败，不再静默吞掉）
+      if [[ -n "$fp" ]]; then
+        printf '   [部分平台失败: %s]' "$fp"
+      fi
+      printf '\n'
       ok_n=$((ok_n + 1))
     else
       printf '  [FAIL]  %-30s %4ss\n' "$shown" "$dur"

@@ -56,15 +56,23 @@ clone_mirror() { # <repo> → 设置 IS_EMPTY=true(空)|false；非零退出 = c
 # Gitee/GitCode 会拒绝更新 hidden ref（deny updating a hidden ref）导致整批失败。
 # 改为显式推送 refs/heads/* 与 refs/tags/* 并 --prune（保留删除多余分支/tag 的语义）
 mirror_push() { # <acct> <repo> → 0/1
-  local acct="$1" repo="$2" url push_out attempt
+  local acct="$1" repo="$2" url push_out attempt rc
   url="git@$(platform_host "$CURRENT_PLATFORM"):$acct/$repo.git"
 
   for attempt in 1 2; do
-    if push_out=$(_timeout git --git-dir="$WORK_DIR/$repo.git" push --prune "$url" \
-        "+refs/heads/*:refs/heads/*" "+refs/tags/*:refs/tags/*" 2>&1); then
+    push_out=$(_timeout git --git-dir="$WORK_DIR/$repo.git" push --prune "$url" \
+        "+refs/heads/*:refs/heads/*" "+refs/tags/*:refs/tags/*" 2>&1)
+    rc=$?
+    if [[ $rc -eq 0 ]]; then
       return 0
     fi
-    log "    [错误] push 失败（第 $attempt 次）: $(err_tail 2 "$(redact_repo "$push_out" "$acct" "$repo")")"
+    if [[ $rc -eq 124 ]]; then
+      # 超时=挂起（macOS 无 timeout 时 rc 为 git 原码，不会出现 124）：
+      # 重试大概率仍挂起，直接判失败并明确提示，避免单仓库拖垮整个 job
+      log "    [错误] push 超时（超过 ${REPO_TIMEOUT:-600}s 无响应，已终止）"
+      return 1
+    fi
+    log "    [错误] push 失败（第 $attempt 次）: $(err_tail 5 "$(redact_repo "$push_out" "$acct" "$repo")")"
   done
   return 1
 }
@@ -126,7 +134,7 @@ sync_to_platform() { # <platform> <repo> <is_private> <def_branch> <is_empty> �
 # ---------- 同步单个仓库到全部目标平台 ----------
 # 用法: sync_one <repo> <is_private:true|false> <default_branch>
 sync_one() {
-  local repo="$1" is_private="$2" def_branch="$3" p platform_ok=0 shown
+  local repo="$1" is_private="$2" def_branch="$3" p platform_ok=0 shown fail_platforms=""
   IS_EMPTY=false
 
   REPO_MASK_PRIVATE="$is_private"   # 供 redact_repo 判断是否脱敏
@@ -136,13 +144,22 @@ sync_one() {
   # 1. 克隆镜像仓库 + 空仓库检测（IS_EMPTY 由 clone_mirror 设置）
   clone_mirror "$repo" || return 1
 
-  # 2. 逐个目标平台（任一平台成功即仓库整体成功）
+  # 2. 逐个目标平台（任一平台成功即仓库整体成功；失败平台记录明细）
   while IFS= read -r p; do
-    sync_to_platform "$p" "$repo" "$is_private" "$def_branch" "$IS_EMPTY" \
-      && platform_ok=1
+    if sync_to_platform "$p" "$repo" "$is_private" "$def_branch" "$IS_EMPTY"; then
+      platform_ok=1
+    else
+      fail_platforms="${fail_platforms:+$fail_platforms,}$p"
+    fi
   done < <(discover_platforms)
 
-  # 3. 所有目标平台均失败才判定仓库同步失败（单平台失败不再被静默吞掉）
+  # 3. 平台级失败明细写入状态文件（供 main 汇总展示）。
+  #    sync_one 在子 shell 执行，无法直接传值给 main，只能经文件传递；
+  #    clone 失败提前 return 时不写文件，main 侧读取带容错
+  mkdir -p "$WORK_DIR/status/fail_platforms"
+  printf '%s' "$fail_platforms" > "$WORK_DIR/status/fail_platforms/$repo"
+
+  # 4. 所有目标平台均失败才判定仓库同步失败（单平台失败在汇总中标注，不判仓库失败）
   if [[ $platform_ok -eq 0 ]]; then
     log "  [错误] 所有目标平台均同步失败"
     return 1
@@ -181,14 +198,19 @@ main() {
   set -e
 
   dur=$(( $(date +%s) - start_ts ))
+  # results.tsv 第 5 列 = 平台级失败明细（sync_one 经 status/fail_platforms/<repo> 落盘）
   if [[ $rc -eq 0 ]]; then
     printf '  [ OK ] %-30s (%ss)\n' "$shown" "$dur"
     echo "$repo" >> "$WORK_DIR/status/ok/list"
-    printf '%s\t%s\tok\t%s\n' "$repo" "$is_private" "$dur" >> "$WORK_DIR/status/results.tsv"
+    printf '%s\t%s\tok\t%s\t%s\n' "$repo" "$is_private" "$dur" \
+      "$(cat "$WORK_DIR/status/fail_platforms/$repo" 2>/dev/null || true)" \
+      >> "$WORK_DIR/status/results.tsv"
   else
     printf '  [FAIL] %-30s (%ss)\n' "$shown" "$dur"
     printf '%s\t%s\n' "$repo" "$is_private" >> "$WORK_DIR/status/fail/list"
-    printf '%s\t%s\tfail\t%s\n' "$repo" "$is_private" "$dur" >> "$WORK_DIR/status/results.tsv"
+    printf '%s\t%s\tfail\t%s\t%s\n' "$repo" "$is_private" "$dur" \
+      "$(cat "$WORK_DIR/status/fail_platforms/$repo" 2>/dev/null || true)" \
+      >> "$WORK_DIR/status/results.tsv"
   fi
 
   # 统一 exit 0：失败经 status/fail/list 上报（mirror.sh 的 summarize 汇总），

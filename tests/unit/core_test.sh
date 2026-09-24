@@ -79,6 +79,7 @@ rm -rf "$MOCK_GITEE_DIR/test/repo-a.git" "$WORK_DIR/repo-a.git"
 assert_status 0 $?
 assert_file_contains "$WORK_DIR/createfail.log" "创建仓库失败"
 assert_file_contains "$WORK_DIR/createfail.log" "push 完成"     # gitcode 不受影响
+assert_eq "gitee" "$(cat "$WORK_DIR/status/fail_platforms/repo-a")"  # 失败平台落盘
 unset MOCK_GITEE_EXISTS MOCK_GITCODE_EXISTS MOCK_CREATE_CODE
 rm -rf "$WORK_DIR/repo-a.git"
 
@@ -93,6 +94,21 @@ assert_status 0 $?
 assert_file_contains "$WORK_DIR/retry.log" "第 1 次"
 assert_file_contains "$WORK_DIR/retry.log" "push 完成"
 unset MOCK_FAIL_PUSH MOCK_FAIL_MARKER
+rm -rf "$WORK_DIR/repo-a.git"
+
+# ---------- push 超时（124）不重试 + 平台级失败明细 ----------
+t "sync_one push 超时不重试且记录失败平台"
+export MOCK_PUSH_TIMEOUT=true
+rm -rf "$MOCK_GITEE_DIR/test/repo-a.git" "$WORK_DIR/repo-a.git"
+mkdir -p "$MOCK_GITEE_DIR/test"
+git init --bare "$MOCK_GITEE_DIR/test/repo-a.git" -q
+( set -e; sync_one repo-a true main ) >"$WORK_DIR/timeout.log" 2>&1
+assert_status 0 $?                          # gitcode 成功 → 仓库整体 OK
+assert_file_contains "$WORK_DIR/timeout.log" "push 超时"        # 明确超时提示（非空错误）
+assert_file_contains "$WORK_DIR/timeout.log" "push 完成"        # gitcode 不受影响
+assert_not_contains "$(cat "$WORK_DIR/timeout.log")" "第 2 次"  # 超时不重试
+assert_eq "gitee" "$(cat "$WORK_DIR/status/fail_platforms/repo-a")"  # 平台级失败明细
+unset MOCK_PUSH_TIMEOUT
 rm -rf "$WORK_DIR/repo-a.git"
 
 # ---------- 不推送 refs/pull/* 隐藏 ref（--mirror 会因 hidden ref 被拒） ----------

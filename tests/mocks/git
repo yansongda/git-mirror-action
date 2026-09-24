@@ -4,6 +4,7 @@
 # 环境变量:
 #   MOCK_GH_DIR / MOCK_GITEE_DIR / MOCK_GITCODE_DIR（fake 仓库根目录）
 #   MOCK_FAIL_PUSH=true + MOCK_FAIL_MARKER=<文件>：首次 push 失败（测重试）
+#   MOCK_PUSH_TIMEOUT=true：gitee 的 push 直接退出 124（模拟 timeout 超时，测超时不重试）
 # ============================================================
 real_git=/usr/bin/git
 # 注: 不用 `command -v`——它是 shell 内建，Ubuntu /usr/bin 下无对应可执行文件
@@ -17,6 +18,12 @@ if [[ "${MOCK_FAIL_PUSH:-}" == true && " ${args[*]} " == *" push "* ]]; then
     echo "mock: 模拟首次 push 失败" >&2
     exit 1
   fi
+fi
+
+# 模拟 push 超时（仅 gitee：退出码 124 = timeout 语义，测超时不重试 + 单平台失败）
+if [[ "${MOCK_PUSH_TIMEOUT:-}" == true && " ${args[*]} " == *" push "* && " ${args[*]} " == *"gitee"* ]]; then
+  echo "mock: 模拟 push 超时" >&2
+  exit 124
 fi
 
 for i in "${!args[@]}"; do

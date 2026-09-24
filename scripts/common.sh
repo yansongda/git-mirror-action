@@ -174,5 +174,7 @@ init_ssh() {
     ssh-keyscan -t ed25519,rsa "$h" >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
   done < <(discover_platforms)
   chmod 644 "$HOME/.ssh/known_hosts" 2>/dev/null || true
-  export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_mirror -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR"
+  # ConnectTimeout：连接阶段 15s 内必须建立（正常握手 <5s），
+  # 目标平台网络黑洞时快速失败，避免耗尽整个 REPO_TIMEOUT
+  export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_mirror -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o LogLevel=ERROR"
 }
