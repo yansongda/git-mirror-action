@@ -22,7 +22,8 @@ export MOCK_GH_REPOS_JSON='[{"name":"private-repo","private":true,"fork":false,"
 # gitee 已有 public-repo，其余不存在
 export MOCK_GITEE_EXISTS=false
 
-RUN="env PATH=$PROJECT_ROOT/tests/mocks:$PATH \
+mkdir -p "$FAKE_ROOT/home"   # HOME 隔离：init_ssh/init_git_auth 会写 HOME 下的 SSH/git 认证文件
+RUN="env PATH=$PROJECT_ROOT/tests/mocks:$PATH HOME=$FAKE_ROOT/home \
 SRC_ACCOUNT=test SRC_TOKEN=fake SRC_ACCOUNT_TYPE=user \
 BLACKLIST=black-repo WHITELIST= SKIP_FORKS=true SKIP_ARCHIVED=false \
 DST_PRIVATE=auto CONCURRENCY=2 REPO_TIMEOUT=60 DRY_RUN=true \
