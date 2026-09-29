@@ -12,7 +12,7 @@
 gh_api() { # method path → API_CODE / API_BODY；curl 失败/5xx/429 重试 1 次
   local method="$1" path="$2" resp i
   for i in 1 2; do
-    if resp=$(curl -sS --max-time 60 -w $'\n%{http_code}' -X "$method" \
+    if resp=$(curl -sS --connect-timeout "${API_CONNECT_TIMEOUT:-10}" --max-time "${API_TIMEOUT:-30}" -w $'\n%{http_code}' -X "$method" \
       -H "Authorization: token $SRC_TOKEN" \
       -H "Accept: application/vnd.github+json" \
       "https://api.github.com$path"); then

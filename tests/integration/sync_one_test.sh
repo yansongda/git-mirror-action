@@ -21,7 +21,7 @@ add_source_ref repo-a dev
 make_empty_dest "$MOCK_GITEE_DIR/test"
 make_empty_dest "$MOCK_GITCODE_DIR/test"
 
-SYNC_ONE="env PATH=$PROJECT_ROOT/tests/mocks:$PATH HOME=$FAKE_ROOT/home bash $PROJECT_ROOT/scripts/core.sh"
+SYNC_ONE="env PATH=$PROJECT_ROOT/tests/mocks:$PATH HOME=$FAKE_ROOT/home API_RETRY_DELAY=0 bash $PROJECT_ROOT/scripts/core.sh"
 
 # ---------- 成功路径（私有仓库 → 日志名脱敏） ----------
 t "core.sh 成功: [OK] + 状态文件 + 目标同步（私有名脱敏）"
@@ -55,6 +55,20 @@ t "状态文件 ok/fail 互不串扰"
 assert_eq "2" "$(wc -l < "$WORK_DIR/status/ok/list" | tr -d ' ')"   # repo-a + repo-pub
 assert_eq "1" "$(wc -l < "$WORK_DIR/status/fail/list" | tr -d ' ')"
 assert_not_contains "$(cat "$WORK_DIR/status/ok/list")" "no-such-repo"
+
+# ---------- 含 LFS 仓库：不支持 LFS 的平台（gitcode）跳过，其余平台正常（独立进程路径） ----------
+t "core.sh 含 LFS 仓库: gitcode 跳过 + 状态文件标注 + 仓库整体 OK"
+make_source_repo repo-lfs main
+add_lfs_attr repo-lfs main
+make_empty_dest "$MOCK_GITEE_DIR/test" repo-lfs
+make_empty_dest "$MOCK_GITCODE_DIR/test" repo-lfs
+export MOCK_GITEE_EXISTS=true MOCK_GITCODE_EXISTS=true
+out=$($SYNC_ONE repo-lfs false main)
+assert_status 0 $?
+assert_contains "$out" "[ OK ] repo-lfs"
+assert_contains "$out" "源仓库含 Git LFS 对象"
+assert_eq "gitcode" "$(cat "$WORK_DIR/status/fail_platforms/repo-lfs")"
+unset MOCK_GITEE_EXISTS MOCK_GITCODE_EXISTS
 
 # ---------- 缺参数 ----------
 t "core.sh 缺参数报错退出"

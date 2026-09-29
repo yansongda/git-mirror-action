@@ -8,11 +8,19 @@ on:
 permissions:
   contents: read
 
+# 防 cron 与手动触发重叠（不取消进行中的任务，排队等待）
+concurrency:
+  group: mirror
+  cancel-in-progress: false
+
 jobs:
   mirror:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false   # 同步全程不使用源仓库凭证，不落 .git/config
 
       # 引用仓库内的 composite action（自举使用）
       - name: Mirror to Gitee & GitCode
@@ -26,7 +34,7 @@ jobs:
           skip_forks: 'true'
           skip_archived: 'false'
           dst_private: auto               # auto(跟随源) / true(全部私有) / false(全部公开)
-          concurrency: '4'
+          concurrency: '8'                # 工作量为纯网络等待，并发是主要提速手段（Gitee/GitCode 限流见 README）
           repo_timeout: '600'
           dry_run: 'false'
         env:

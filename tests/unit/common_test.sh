@@ -90,6 +90,11 @@ assert_not_contains "$(printf 'a access_token=abc123 b' | sanitize)" 'abc123'
 t "sanitize 脱敏 Authorization 头"
 assert_contains "$(printf 'Authorization: token abc123' | sanitize)" 'Authorization: token ***'
 
+t "sanitize 脱敏 PRIVATE-TOKEN 头（含大小写两种写法）"
+assert_eq 'PRIVATE-TOKEN: ***' "$(printf 'PRIVATE-TOKEN: abc123' | sanitize)"
+assert_eq 'private-token: ***' "$(printf 'private-token: abc123' | sanitize)"
+assert_not_contains "$(printf 'PRIVATE-TOKEN: abc123' | sanitize)" 'abc123'
+
 t "sanitize 原文无 token 不变"
 assert_eq "hello world" "$(printf 'hello world' | sanitize)"
 
@@ -126,6 +131,8 @@ unset REPO_MASK_PRIVATE
 # ---------- 平台操作方法（mock curl；source 平台插件自包含实现） ----------
 export PATH="$PROJECT_ROOT/tests/mocks:$PATH"
 export DST_GITEE_TOKEN=fake DST_GITCODE_TOKEN=fake
+# 平台 API 重试退避不等待（CI 加速）
+export API_RETRY_DELAY=0
 export CURRENT_PLATFORM=gitee
 source "$SCRIPT_DIR/platforms/gitee.sh"
 export CURRENT_PLATFORM=gitcode
@@ -243,6 +250,14 @@ unset MOCK_VISIBILITY_CODE
 t "gitcode set_default_branch(200)"
 platform_gitcode_set_default_branch test repo-a main
 assert_status 0 $?
+
+t "platform_lfs_supported 未声明平台默认支持 LFS"
+platform_lfs_supported gitee
+assert_status 0 $?
+
+t "platform_lfs_supported gitcode 声明不支持 LFS 镜像"
+platform_lfs_supported gitcode
+assert_status 1 $?
 
 # 分派: 平台未实现方法时报错
 t "platform_call 未实现方法报错"

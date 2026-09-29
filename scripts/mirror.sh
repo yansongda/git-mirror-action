@@ -27,6 +27,8 @@ load_config() {
   DST_PRIVATE="${DST_PRIVATE:-auto}"
   CONCURRENCY="${CONCURRENCY:-4}"
   REPO_TIMEOUT="${REPO_TIMEOUT:-600}"
+  API_TIMEOUT="${API_TIMEOUT:-30}"
+  STRICT="${STRICT:-false}"
   DRY_RUN="${DRY_RUN:-false}"
   MIRROR_PRIVATE_KEY="${MIRROR_PRIVATE_KEY:-}"
   WORK_DIR="${WORK_DIR:-${RUNNER_TEMP:-/tmp}/git-mirror}"
@@ -41,6 +43,11 @@ validate_config() {
     *) die "SRC_ACCOUNT_TYPE 仅支持 user/org (当前: $SRC_ACCOUNT_TYPE)" ;;
   esac
   [[ "$CONCURRENCY" =~ ^[0-9]+$ ]] || die "CONCURRENCY 必须为数字 (当前: $CONCURRENCY)"
+  [[ "$API_TIMEOUT" =~ ^[0-9]+$ ]] || die "API_TIMEOUT 必须为非负整数 (当前: $API_TIMEOUT)"
+  case "$STRICT" in
+    true|false) ;;
+    *) die "STRICT 仅支持 true/false (当前: $STRICT)" ;;
+  esac
   case "$DST_PRIVATE" in
     auto|true|false) ;;
     *) die "DST_PRIVATE 仅支持 auto/true/false (当前: $DST_PRIVATE)" ;;
@@ -81,7 +88,7 @@ print_banner() {
   log "========== git-mirror-action =========="
   log "源:   $SRC_ACCOUNT ($SRC_ACCOUNT_TYPE)"
   log "目标: ${PLATFORMS[*]}"
-  log "并发: $CONCURRENCY | 单命令超时: ${REPO_TIMEOUT}s | 目标可见性: $DST_PRIVATE"
+  log "并发: $CONCURRENCY | 单命令超时: ${REPO_TIMEOUT}s | API 超时: ${API_TIMEOUT}s | 目标可见性: $DST_PRIVATE | strict: $STRICT"
   log "模式: $([ "$DRY_RUN" = true ] && echo DRY-RUN || echo 实际同步)"
 }
 
@@ -119,9 +126,10 @@ filter_repos() {
 }
 
 # ---------- DRY-RUN：仅检查目标端状态，不产生任何推送 ----------
+# 注：dry-run 不做 clone，因此无法预测"含 LFS 的对象在不支持 LFS 的平台将被跳过"
 dry_run_mode() {
   log "===== DRY RUN：仅检查，不推送 ====="
-  local name is_private def_branch p shown priv
+  local name is_private def_branch p shown priv rc
   while IFS=$'\t' read -r name is_private def_branch; do
     shown=$(mask_repo "$name" "$is_private")
     for p in "${PLATFORMS[@]}"; do
@@ -130,11 +138,23 @@ dry_run_mode() {
       platform_load "$p" || continue
       acct=$(platform_account "$p")
       priv=$(resolve_private "$is_private" "$p")
-      if platform_call repo_exists "$acct" "$name"; then
-        printf '  [dry] %-30s → %s/%s: 已存在 (private=%s)\n' "$shown" "$p" "$acct" "$priv"
-      else
-        printf '  [dry] %-30s → %s/%s: 不存在 (将创建 private=%s)\n' "$shown" "$p" "$acct" "$priv"
-      fi
+      # shellcheck disable=SC2034   # repo_exists 写入的全局状态缓存（仅用于展示）
+      DEST_REPO_PRIVATE=""
+      DEST_DEFAULT_BRANCH=""
+      rc=0
+      platform_call repo_exists "$acct" "$name" || rc=$?
+      case "$rc" in
+        0)
+          printf '  [dry] %-30s → %s/%s: 已存在 (private=%s, 默认分支=%s)\n' \
+            "$shown" "$p" "$acct" "${DEST_REPO_PRIVATE:-未知}" "${DEST_DEFAULT_BRANCH:-未知}"
+          ;;
+        1)
+          printf '  [dry] %-30s → %s/%s: 不存在 (将创建 private=%s)\n' "$shown" "$p" "$acct" "$priv"
+          ;;
+        *)
+          printf '  [dry] %-30s → %s/%s: 查询失败 (HTTP %s)（同步时该平台将判失败）\n' "$shown" "$p" "$acct" "$API_CODE"
+          ;;
+      esac
     done
   done < "$WORK_DIR/final.tsv"
   log "DRY RUN 完成"
@@ -147,12 +167,37 @@ sync_all() {
   xargs -P "$CONCURRENCY" -n 3 bash "$SCRIPT_DIR/core.sh" < "$WORK_DIR/final.tsv"
 }
 
-# ---------- 汇总：失败仓库详情（退出码由 main 统一判断） ----------
+# ---------- 平台级失败计数（results.tsv 第 5 列非空 = 该仓库有平台级失败） ----------
+count_platform_failures() {
+  [[ -f "$WORK_DIR/status/results.tsv" ]] || { echo 0; return 0; }
+  local r priv st dur fp n=0
+  while IFS=$'\t' read -r r priv st dur fp; do
+    if [[ -n "$fp" ]]; then
+      n=$((n + 1))
+    fi
+  done < "$WORK_DIR/status/results.tsv"
+  echo "$n"
+}
+
+# ---------- 汇总：失败仓库详情 + 平台级失败标注（退出码由 main 统一判断） ----------
 summarize() {
-  local ok_n=0 fail_n=0 f is_private shown
+  local ok_n=0 fail_n=0 pf_n f is_private shown r priv st dur fps
   [[ -f "$WORK_DIR/status/ok/list" ]] && ok_n=$(wc -l < "$WORK_DIR/status/ok/list" | tr -d ' ')
   [[ -f "$WORK_DIR/status/fail/list" ]] && fail_n=$(wc -l < "$WORK_DIR/status/fail/list" | tr -d ' ')
-  log "===== 汇总: 成功 $ok_n / 失败 $fail_n / 共 $FINAL_COUNT ====="
+  pf_n=$(count_platform_failures)
+  log "===== 汇总: 成功 $ok_n / 失败 $fail_n / 平台失败 $pf_n / 共 $FINAL_COUNT ====="
+  # 平台级明细：仓库级 OK 但某平台失败（如 GitCode 被拒），显式列出 + CI annotation，不再静默吞掉
+  if [[ -f "$WORK_DIR/status/results.tsv" ]]; then
+    while IFS=$'\t' read -r r priv st dur fps; do
+      if [[ -n "$fps" ]]; then
+        shown=$(mask_repo "$r" "$priv")
+        log "  [平台失败] $shown: $fps"
+        if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+          printf '::warning::%s 平台同步失败: %s\n' "$shown" "$fps"
+        fi
+      fi
+    done < "$WORK_DIR/status/results.tsv"
+  fi
   if [[ "$fail_n" -gt 0 ]]; then
     log "失败仓库详情:"
     while IFS=$'\t' read -r f is_private; do
@@ -160,21 +205,33 @@ summarize() {
       log "  --- $shown ---"
       tail -20 "$WORK_DIR/logs/$f.log" | sed 's/^/      /'
     done < "$WORK_DIR/status/fail/list"
+  elif [[ "$pf_n" -gt 0 ]]; then
+    log "仓库级全部成功，但存在平台级失败（见上方 [平台失败] 明细；strict=true 时将以退出码 1 结束）"
   else
     log "全部同步完成"
   fi
 }
 
-# ---------- 最终汇总（逐仓库成败 + 耗时一览表，结尾输出） ----------
+# ---------- 最终汇总（逐仓库成败 + 耗时一览表 + Step Summary，结尾输出） ----------
 final_summary() {
-  local ok_n=0 fail_n=0 shown r priv st dur fp
+  local ok_n=0 fail_n=0 pf_n=0 shown r priv st dur fp vis sum_file
   log "===== 最终汇总 ====="
   if [[ ! -f "$WORK_DIR/status/results.tsv" ]]; then
     log "  无同步记录"
     return
   fi
+  # CI 下追加 markdown 表格到 Step Summary（未设置该变量时静默跳过，本地调试/测试不受影响）
+  sum_file="${GITHUB_STEP_SUMMARY:-}"
+  if [[ -n "$sum_file" ]]; then
+    printf '## git-mirror-action 同步结果\n\n| 仓库 | 可见性 | 状态 | 耗时 | 失败平台 |\n|---|---|---|---|---|\n' >> "$sum_file"
+  fi
   while IFS=$'\t' read -r r priv st dur fp; do
     shown=$(mask_repo "$r" "$priv")
+    if [[ "$priv" == true ]]; then
+      vis=private
+    else
+      vis=public
+    fi
     if [[ "$st" == ok ]]; then
       printf '  [ OK ]  %-30s %4ss' "$shown" "$dur"
       # 第 5 列 = 平台级失败明细（仓库 OK 但某平台失败，不再静默吞掉）
@@ -187,8 +244,16 @@ final_summary() {
       printf '  [FAIL]  %-30s %4ss\n' "$shown" "$dur"
       fail_n=$((fail_n + 1))
     fi
+    if [[ -n "$sum_file" ]]; then
+      if [[ -n "$fp" ]]; then
+        printf '| %s | %s | %s | %ss | %s |\n' "$shown" "$vis" "$st" "$dur" "$fp" >> "$sum_file"
+      else
+        printf '| %s | %s | %s | %ss | — |\n' "$shown" "$vis" "$st" "$dur" >> "$sum_file"
+      fi
+    fi
   done < "$WORK_DIR/status/results.tsv"
-  log "===== 成功 $ok_n / 失败 $fail_n / 共 $((ok_n + fail_n)) ====="
+  pf_n=$(count_platform_failures)
+  log "===== 成功 $ok_n / 失败 $fail_n / 平台失败 $pf_n / 共 $((ok_n + fail_n)) ====="
 }
 
 # ---------- 主流程 ----------
@@ -207,6 +272,11 @@ main() {
     summarize
     final_summary
     if [[ -f "$WORK_DIR/status/fail/list" && $(wc -l < "$WORK_DIR/status/fail/list" | tr -d ' ') -gt 0 ]]; then
+      exit 1
+    fi
+    # strict: 仓库级全成功但存在平台级失败时同样非零退出（默认 false，仅 warning）
+    if [[ "$STRICT" == true && $(count_platform_failures) -gt 0 ]]; then
+      log "strict=true 且存在平台级失败，以退出码 1 结束"
       exit 1
     fi
   fi

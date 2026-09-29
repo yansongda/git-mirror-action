@@ -73,6 +73,16 @@ assert_contains "$(cat "$MOCK_LOG_FILE")" "affiliation=owner"
 assert_contains "$(cat "$MOCK_LOG_FILE")" "visibility=all"
 unset MOCK_LOG_FILE
 
+t "gh_api 请求带连接超时与 API_TIMEOUT"
+export API_TIMEOUT=9 MOCK_LOG_FILE=/tmp/git-mirror-test-gh-params.log
+rm -f "$MOCK_LOG_FILE"
+export MOCK_GH_REPOS_JSON='[]'
+gh_api GET "/user/repos"
+assert_status 0 $?
+assert_contains "$(cat "$MOCK_LOG_FILE")" "--connect-timeout 10"
+assert_contains "$(cat "$MOCK_LOG_FILE")" "--max-time 9"
+unset MOCK_LOG_FILE API_TIMEOUT
+
 t "token 归属校验: login 与 SRC_ACCOUNT 不一致时 die"
 export MOCK_GH_LOGIN=otheruser
 out=$(gh_list_repos 2>&1); rc=$?

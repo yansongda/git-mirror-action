@@ -44,6 +44,14 @@ inputs:
     description: 'Timeout in seconds for each git command'
     required: false
     default: '600'
+  api_timeout:
+    description: 'Timeout in seconds for each HTTP API call (0 = no limit)'
+    required: false
+    default: '30'
+  strict:
+    description: 'Fail the job when any platform-level failure occurs (true/false)'
+    required: false
+    default: 'false'
   dry_run:
     description: 'Only list repos and check destination status, no clone/push (true/false)'
     required: false
@@ -65,6 +73,8 @@ runs:
         DST_PRIVATE: ${{ inputs.dst_private }}
         CONCURRENCY: ${{ inputs.concurrency }}
         REPO_TIMEOUT: ${{ inputs.repo_timeout }}
+        API_TIMEOUT: ${{ inputs.api_timeout }}
+        STRICT: ${{ inputs.strict }}
         DRY_RUN: ${{ inputs.dry_run }}
       run: |
         bash "${{ github.action_path }}/scripts/mirror.sh"

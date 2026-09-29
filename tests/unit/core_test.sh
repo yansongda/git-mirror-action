@@ -17,6 +17,8 @@ rm -rf "$FAKE_ROOT"
 setup_fake_env "$FAKE_ROOT"
 
 export SRC_ACCOUNT=test SRC_TOKEN=fake DST_PRIVATE=auto REPO_TIMEOUT=60
+# 平台 API 瞬时故障重试不等待（CI 加速；重试逻辑本身由 platform_test 验证）
+export API_RETRY_DELAY=0
 export DST_GITEE_ACCOUNT=test DST_GITEE_TOKEN=fake
 export DST_GITCODE_ACCOUNT=test DST_GITCODE_TOKEN=fake
 WORK_DIR="$FAKE_ROOT/workdir"
@@ -156,16 +158,18 @@ assert_status 0 $?
 assert_file_contains "$WORK_DIR/pullref.log" "push 完成"
 # 目标端不应出现 refs/pull
 assert_eq "" "$(git --git-dir="$MOCK_GITEE_DIR/test/repo-a.git" for-each-ref refs/pull | head -1)"
+# 本地镜像也不再抓取 refs/pull（clone 已收窄至 heads/tags，不拉隐藏 ref）
+assert_eq "" "$(git --git-dir="$WORK_DIR/repo-a.git" for-each-ref refs/pull | head -1)"
 rm -rf "$WORK_DIR/repo-a.git"
 
-# ---------- clone 失败重试（网络抖动类快速失败重试 1 次） ----------
-t "sync_one clone 失败自动重试成功"
+# ---------- 镜像获取失败重试（网络抖动类快速失败重试 1 次） ----------
+t "sync_one 镜像获取失败自动重试成功"
 export MOCK_FAIL_CLONE=true MOCK_FAIL_MARKER="$FAKE_ROOT/clone-fail-marker"
 rm -f "$MOCK_FAIL_MARKER"
 ( set -e; sync_one repo-a true main ) >"$WORK_DIR/cloneretry.log" 2>&1
 assert_status 0 $?
-assert_file_contains "$WORK_DIR/cloneretry.log" "clone 失败（第 1 次）"
-assert_file_contains "$WORK_DIR/cloneretry.log" "clone 完成"
+assert_file_contains "$WORK_DIR/cloneretry.log" "获取镜像失败（第 1 次）"
+assert_file_contains "$WORK_DIR/cloneretry.log" "镜像获取完成"
 unset MOCK_FAIL_CLONE MOCK_FAIL_MARKER
 rm -rf "$WORK_DIR/repo-a.git"
 
@@ -186,5 +190,62 @@ assert_status 1 $?
 assert_file_contains "$WORK_DIR/allfail.log" "所有目标平台均同步失败"
 unset MOCK_GITEE_EXISTS MOCK_GITCODE_EXISTS MOCK_CREATE_CODE
 rm -rf "$WORK_DIR/repo-a.git"
+
+# ---------- repo_exists 请求失败（持续 000）→ 不误建仓、平台级失败 ----------
+t "sync_one 查询目标仓库失败时不误建仓（三态=2）"
+make_source_repo repo-q main
+rm -rf "$WORK_DIR/repo-q.git" "$MOCK_GITEE_DIR/test/repo-q.git" "$MOCK_GITCODE_DIR/test/repo-q.git"
+export MOCK_API_FAIL_ALWAYS=000
+export MOCK_LOG_FILE="$WORK_DIR/api-q.log"; rm -f "$MOCK_LOG_FILE"
+( set -e; sync_one repo-q true main ) >"$WORK_DIR/queryfail.log" 2>&1
+assert_status 1 $?                          # 两平台均无法判定 → 仓库整体失败
+assert_file_contains "$WORK_DIR/queryfail.log" "查询目标仓库失败"
+assert_eq "" "$(grep 'user/repos' "$MOCK_LOG_FILE" || true)"      # 不得发出建仓请求
+assert_eq "gitcode,gitee" "$(cat "$WORK_DIR/status/fail_platforms/repo-q")"
+unset MOCK_API_FAIL_ALWAYS MOCK_LOG_FILE
+rm -rf "$WORK_DIR/repo-q.git"
+
+# ---------- 目标默认分支已一致 → 跳过 set_default_branch（省 1 次请求） ----------
+t "sync_one 默认分支已一致时跳过校正"
+make_source_repo repo-br main
+make_empty_dest "$MOCK_GITEE_DIR/test" repo-br
+make_empty_dest "$MOCK_GITCODE_DIR/test" repo-br
+rm -rf "$WORK_DIR/repo-br.git"
+export MOCK_GITEE_EXISTS=true MOCK_GITCODE_EXISTS=true MOCK_DEST_DEFAULT_BRANCH=main
+export MOCK_LOG_FILE="$WORK_DIR/api-br.log"; rm -f "$MOCK_LOG_FILE"
+( set -e; sync_one repo-br false main ) >"$WORK_DIR/brskip.log" 2>&1
+assert_status 0 $?
+assert_file_contains "$WORK_DIR/brskip.log" "默认分支已一致 (main)，跳过校正"
+assert_eq "" "$(grep 'default_branch' "$MOCK_LOG_FILE" || true)"    # 无默认分支 PATCH 请求
+rm -rf "$WORK_DIR/repo-br.git"
+
+# ---------- 目标默认分支不一致 → 仍校正 ----------
+t "sync_one 默认分支不一致时仍校正"
+export MOCK_DEST_DEFAULT_BRANCH=master
+export MOCK_LOG_FILE="$WORK_DIR/api-br2.log"; rm -f "$MOCK_LOG_FILE"
+( set -e; sync_one repo-br false main ) >"$WORK_DIR/brpatch.log" 2>&1
+assert_status 0 $?
+assert_file_contains "$WORK_DIR/brpatch.log" "默认分支已设为 main"
+assert_contains "$(cat "$MOCK_LOG_FILE")" "default_branch"
+unset MOCK_LOG_FILE MOCK_DEST_DEFAULT_BRANCH MOCK_GITEE_EXISTS MOCK_GITCODE_EXISTS
+rm -rf "$WORK_DIR/repo-br.git"
+
+# ---------- 含 LFS 的仓库在不支持 LFS 的平台（gitcode）跳过 ----------
+t "sync_one 含 LFS 的仓库在 gitcode 跳过、gitee 正常推送"
+make_source_repo repo-lfs main
+add_lfs_attr repo-lfs main
+make_empty_dest "$MOCK_GITEE_DIR/test" repo-lfs
+make_empty_dest "$MOCK_GITCODE_DIR/test" repo-lfs
+rm -rf "$WORK_DIR/repo-lfs.git"
+export MOCK_GITEE_EXISTS=true MOCK_GITCODE_EXISTS=true
+export MOCK_LOG_FILE="$WORK_DIR/api-lfs.log"; rm -f "$MOCK_LOG_FILE"
+( set -e; sync_one repo-lfs false main ) >"$WORK_DIR/lfs.log" 2>&1
+assert_status 0 $?                          # gitee 成功 → 仓库整体 OK
+assert_file_contains "$WORK_DIR/lfs.log" "源仓库含 Git LFS 对象，gitcode 不支持 LFS 镜像推送"
+assert_file_contains "$WORK_DIR/lfs.log" "push 完成"
+assert_eq "gitcode" "$(cat "$WORK_DIR/status/fail_platforms/repo-lfs")"
+assert_eq "" "$(grep 'gitcode.com' "$MOCK_LOG_FILE" || true)"    # gitcode 零请求（不建仓不推送）
+unset MOCK_LOG_FILE MOCK_GITEE_EXISTS MOCK_GITCODE_EXISTS
+rm -rf "$WORK_DIR/repo-lfs.git"
 
 summary

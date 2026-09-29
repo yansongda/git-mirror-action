@@ -5,6 +5,7 @@
 #   source tests/lib/env.sh
 #   setup_fake_env /tmp/xxx        # 创建 fake 环境根目录
 #   make_source_repo repo-a main   # 造源仓库（含 1 个提交）
+#   add_lfs_attr repo-a main       # 给源仓库加 LFS 声明（.gitattributes 含 filter=lfs）
 #   make_empty_dest <dir>          # 造空目标仓库
 # ============================================================
 
@@ -59,7 +60,24 @@ add_source_ref() { # repo ref（如 dev 或 v1.0，tag 前缀 t:）
   rm -rf "$tmp"
 }
 
-# 造空目标仓库
+# 给源仓库追加 LFS 声明（用于测试"不支持 LFS 的平台跳过"路径）
+# best-effort 检测依据默认分支 tip 的 .gitattributes，因此提交到默认分支即可命中
+add_lfs_attr() { # repo 名 [默认分支=main]
+  local repo="$1" branch="${2:-main}" account="${SRC_ACCOUNT:-test}"
+  local dir="$MOCK_GH_DIR/$account/$repo.git"
+  local tmp="$FAKE_ROOT/work3"
+  rm -rf "$tmp" && mkdir -p "$tmp"
+  (
+    cd "$tmp" || exit 1
+    git clone -q "$dir" w && cd w || exit 1
+    git config user.email test@test && git config user.name test
+    printf '*.bin filter=lfs diff=lfs merge=lfs -text\n' > .gitattributes
+    git add .gitattributes && git commit -qm "add lfs attributes"
+    git push -q origin "HEAD:refs/heads/$branch"
+  )
+  rm -rf "$tmp"
+}
+
 make_empty_dest() { # 目标仓库目录 [仓库名=repo-a]
   local repo="${2:-repo-a}"
   mkdir -p "$1"

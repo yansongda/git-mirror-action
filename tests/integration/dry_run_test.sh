@@ -26,7 +26,7 @@ mkdir -p "$FAKE_ROOT/home"   # HOME 隔离：init_ssh/init_git_auth 会写 HOME 
 RUN="env PATH=$PROJECT_ROOT/tests/mocks:$PATH HOME=$FAKE_ROOT/home \
 SRC_ACCOUNT=test SRC_TOKEN=fake SRC_ACCOUNT_TYPE=user \
 BLACKLIST=black-repo WHITELIST= SKIP_FORKS=true SKIP_ARCHIVED=false \
-DST_PRIVATE=auto CONCURRENCY=2 REPO_TIMEOUT=60 DRY_RUN=true \
+DST_PRIVATE=auto CONCURRENCY=2 REPO_TIMEOUT=60 DRY_RUN=true API_RETRY_DELAY=0 \
 DST_GITEE_ACCOUNT=test DST_GITEE_TOKEN=fake \
 DST_GITCODE_ACCOUNT=test DST_GITCODE_TOKEN=fake \
 MIRROR_PRIVATE_KEY=unused WORK_DIR=$FAKE_ROOT/workdir \
@@ -53,5 +53,18 @@ assert_contains "$out" "DRY RUN 完成"
 
 t "dry-run 不产生任何 clone（无 git 调用）"
 assert_not_contains "$out" "clone"
+
+# ---------- dry-run 展示目标端当前状态（默认分支 + 三态查询失败） ----------
+t "dry-run 已存在时展示目标端可见性与默认分支"
+out=$(MOCK_GITEE_EXISTS=true MOCK_DEST_DEFAULT_BRANCH=main $RUN)
+assert_status 0 $?
+assert_contains "$out" "已存在 (private="
+assert_contains "$out" "默认分支=main"
+
+t "dry-run 查询失败时输出失败而不得误报不存在"
+out=$(MOCK_API_FAIL_ALWAYS=000 $RUN)
+assert_status 0 $?
+assert_contains "$out" "查询失败 (HTTP 000)"
+assert_not_contains "$out" "不存在 (将创建"
 
 summary

@@ -7,7 +7,7 @@
 # source（供测试加载 sync_one 函数）:
 #   source scripts/core.sh
 #
-# 职责: 同步业务逻辑（sync_one + 子函数 clone_mirror/mirror_push/
+# 职责: 同步业务逻辑（sync_one + 子函数 clone_mirror/lfs_tracked/mirror_push/
 #        sync_to_platform）+ 进程入口（main）
 # 依赖: common.sh（log/sanitize/_timeout/platform_*）
 # 需要环境变量: SRC_ACCOUNT / SRC_TOKEN / WORK_DIR / REPO_TIMEOUT / DST_PRIVATE
@@ -29,28 +29,34 @@ err_tail() { # <行数> <文本> [最大字符数]
   fi
 }
 
-# ---------- 克隆镜像仓库（源端认证走 GIT_ASKPASS basic auth，token 不进 URL / 日志） ----------
+# ---------- 获取镜像仓库（源端认证走 GIT_ASKPASS basic auth，token 不进 URL / 日志） ----------
+# 不用 git clone --mirror：它会按 +refs/*:refs/* 抓取 refs/pull/* 等隐藏 ref
+# （本地冗余对象；推送侧已显式限定 heads/tags，这些 ref 完全不参与）
+# 改为 init --bare + 直接对 URL 做显式 refspec fetch：不建 remote（避免多出
+# refs/remotes/* 镜像）且不拉无关 ref（已实测无 refs/pull / refs/remotes）
 # 通过全局 IS_EMPTY 传值（同 common.sh 的 CURRENT_PLATFORM 模式）：
 # 函数内 log 走 stdout，若用命令替换捕获返回值会把日志一起吞掉
 # 失败重试 1 次（同 push 语义：网络抖动类快速失败才值得重试；超时挂起不重试）
-clone_mirror() { # <repo> → 设置 IS_EMPTY=true(空)|false；非零退出 = clone 失败
+clone_mirror() { # <repo> → 设置 IS_EMPTY=true(空)|false；非零退出 = 获取失败
   local repo="$1" clone_out rc attempt
 
   for attempt in 1 2; do
-    clone_out=$(_timeout git clone --mirror \
-      "https://github.com/$SRC_ACCOUNT/$repo.git" "$WORK_DIR/$repo.git" 2>&1)
+    git init --bare -q "$WORK_DIR/$repo.git" 2>/dev/null
+    clone_out=$(_timeout git --git-dir="$WORK_DIR/$repo.git" fetch --prune \
+      "https://github.com/$SRC_ACCOUNT/$repo.git" \
+      '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*' 2>&1)
     rc=$?
     if [[ $rc -eq 0 ]]; then
-      log "  clone 完成"
+      log "  镜像获取完成"
       break
     fi
     if [[ $rc -eq 124 ]]; then
       # 超时=挂起（macOS 无 timeout 时 rc 为 git 原码，不会出现 124）：
       # 重试大概率仍挂起，直接判失败（同 mirror_push 语义）
-      log "    [错误] clone 超时（超过 ${REPO_TIMEOUT:-600}s 无响应，已终止，不重试）"
+      log "    [错误] 获取镜像超时（超过 ${REPO_TIMEOUT:-600}s 无响应，已终止，不重试）"
       return 1
     fi
-    log "    [错误] clone 失败（第 $attempt 次）: $(err_tail 3 "$(redact_repo "$clone_out" "$SRC_ACCOUNT" "$repo")")"
+    log "    [错误] 获取镜像失败（第 $attempt 次）: $(err_tail 3 "$(redact_repo "$clone_out" "$SRC_ACCOUNT" "$repo")")"
     rm -rf "$WORK_DIR/$repo.git"   # 清理半成品目录，否则重试会因目录非空而失败
     [[ $attempt -eq 2 ]] && return 1
   done
@@ -90,10 +96,20 @@ mirror_push() { # <acct> <repo> → 0/1
   return 1
 }
 
+# ---------- LFS 检测（best-effort：只看指定分支 tip 的 .gitattributes） ----------
+# 命中（含 filter=lfs 声明）即认为该仓库依赖 Git LFS；
+# 范围局限：不覆盖其他分支 / 子模块 / 手写指针文件；
+# ref 不存在或 git 报错 → 视为不含，安全降级为"照常推送"（与未引入该检查时行为一致）
+# 已实测：命中返回 0；无 LFS 仓库返回 1；ref 不存在返回 128（均按预期降级）
+lfs_tracked() { # <镜像目录> <分支> → 0=含 LFS
+  [[ -n "${2:-}" ]] || return 1
+  git --git-dir="$1" grep -q -F 'filter=lfs' "refs/heads/$2" 2>/dev/null
+}
+
 # ---------- 同步单个目标平台 ----------
-# 步骤: 加载/校验插件 → 建仓 → 校正可见性 → 推送 → 设默认分支
+# 步骤: 加载/校验插件 → LFS 能力检查 → 建仓 → 校正可见性 → 推送 → 设默认分支
 sync_to_platform() { # <platform> <repo> <is_private> <def_branch> <is_empty> → 0/1
-  local p="$1" repo="$2" is_private="$3" def_branch="$4" is_empty="$5" acct priv
+  local p="$1" repo="$2" is_private="$3" def_branch="$4" is_empty="$5" acct priv ex
 
   CURRENT_PLATFORM="$p"
   platform_load "$p" || { log "  [warn] $p 插件加载失败，跳过"; return 1; }
@@ -106,12 +122,28 @@ sync_to_platform() { # <platform> <repo> <is_private> <def_branch> <is_empty> �
   priv=$(resolve_private "$is_private" "$p")
   log "  → $p/$acct (private=$priv)"
 
-  # 目标仓库不存在则创建。
-  # repo_exists/create_repo 在已确认目标端可见性时设置全局 DEST_REPO_PRIVATE（true|false），
+  # 平台能力检查：不支持 LFS 镜像的平台（pre-receive 会因缺 LFS 对象拒绝整个 push）
+  # 遇到含 LFS 的仓库直接跳过该平台，不再白跑建仓/推送与重试；
+  # 检测在 repo_exists 之前 → 命中仓库零请求（不建仓也不推送），避免留下空仓库
+  if [[ "$is_empty" != true ]] && ! platform_lfs_supported "$p" && lfs_tracked "$WORK_DIR/$repo.git" "$def_branch"; then
+    log "    [skip] 源仓库含 Git LFS 对象，$p 不支持 LFS 镜像推送（已跳过该平台）"
+    return 1
+  fi
+
+  # 目标仓库不存在则创建。repo_exists 三态:
+  #   0=存在 1=明确不存在(404) 2=请求失败（已重试过，无法判定）
+  # 只有明确不存在才建仓——网络故障/限流被误当作"不存在"会发出无效建仓请求并产生假失败。
+  # repo_exists/create_repo 在已确认目标端状态时设置全局 DEST_REPO_PRIVATE / DEST_DEFAULT_BRANCH，
   # 无法确认（如 422 幂等兜底、响应缺字段）时留空
   DEST_REPO_PRIVATE=""
-  if platform_call repo_exists "$acct" "$repo"; then
+  DEST_DEFAULT_BRANCH=""
+  ex=0
+  platform_call repo_exists "$acct" "$repo" || ex=$?
+  if [[ $ex -eq 0 ]]; then
     log "    目标仓库已存在"
+  elif [[ $ex -eq 2 ]]; then
+    log "    [错误] 查询目标仓库失败 (HTTP $API_CODE): $(err_tail 1 "$(redact_repo "$API_BODY" "$acct" "$repo")" 300)"
+    return 1
   elif platform_call create_repo "$acct" "$repo" "$priv"; then
     log "    目标仓库创建成功"
   else
@@ -142,8 +174,12 @@ sync_to_platform() { # <platform> <repo> <is_private> <def_branch> <is_empty> �
   fi
   log "    push 完成"
 
-  # 修正目标端默认分支（mirror push 不携带远端 HEAD）
-  if platform_call set_default_branch "$acct" "$repo" "$def_branch"; then
+  # 修正目标端默认分支（mirror push 不携带远端 HEAD）。
+  # repo_exists 已确认目标端默认分支且与预期一致时跳过 PATCH（省 1 次请求/仓库/平台）；
+  # 无法确认（新建仓库/响应缺字段）时照常 PATCH，宁多一次不漏设
+  if [[ -n "$DEST_DEFAULT_BRANCH" && "$DEST_DEFAULT_BRANCH" == "$def_branch" ]]; then
+    log "    默认分支已一致 ($def_branch)，跳过校正"
+  elif platform_call set_default_branch "$acct" "$repo" "$def_branch"; then
     log "    默认分支已设为 $def_branch"
   else
     log "    [warn] 设置默认分支失败 (HTTP $API_CODE)"

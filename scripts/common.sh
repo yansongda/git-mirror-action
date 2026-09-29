@@ -12,7 +12,9 @@ die() { log "错误: $*" >&2; exit 1; }
 
 # ---------- 脱敏（token 永不落入日志） ----------
 sanitize() {
-  sed -E 's#(access_token=)[^&"[:space:]]+#\1***#g; s#(Authorization: (token|Bearer) )[^"[:space:]]+#\1***#g'
+  # 注: PRIVATE-TOKEN 逐字母用字符类（[Pp][Rr]...）而非 [Pp]rivate —— 后者只覆盖首字母大小写差异，
+  # 漏掉全大写的 PRIVATE-TOKEN；且 BSD sed 不支持 GNU 的 I 标志
+  sed -E 's#(access_token=)[^&"[:space:]]+#\1***#g; s#(Authorization: (token|Bearer) )[^"[:space:]]+#\1***#g; s#([Pp][Rr][Ii][Vv][Aa][Tt][Ee][-_][Tt][Oo][Kk][Ee][Nn]:[[:space:]]+)[^"[:space:]]+#\1***#g'
 }
 
 # ---------- 私有仓库名称脱敏（公开仓库原样输出） ----------
@@ -85,6 +87,17 @@ platform_host() { # platform → host（用于 SSH push URL 与 known_hosts）
   else
     echo "$1"
   fi
+}
+
+# ---------- 目标端 LFS 能力探测（平台可选能力声明） ----------
+# 平台可选实现 platform_<name>_supports_lfs:
+#   返回 0 = 支持 LFS 镜像推送（默认，未声明该方法的平台同此）
+#   返回 1 = 不支持（如 GitCode 的 pre-receive 会因缺 LFS 对象拒绝整个 push）
+# core.sh 对"不支持 + 源含 LFS"的仓库直接跳过该平台，避免每次白跑一遍无效推送
+platform_lfs_supported() { # platform → 0=支持(默认) 1=不支持
+  local fn="platform_${1}_supports_lfs"
+  declare -F "$fn" >/dev/null 2>&1 || return 0
+  "$fn"
 }
 
 # ---------- 目标端可见性计算 ----------

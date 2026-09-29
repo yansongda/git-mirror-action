@@ -5,7 +5,10 @@
 #   MOCK_GH_REPOS_JSON / MOCK_GH_PAGE2_JSON / MOCK_GH_CODE / MOCK_GH_FAIL_ONCE+MOCK_GH_MARKER
 #   MOCK_GITEE_EXISTS / MOCK_GITCODE_EXISTS (true|false)
 #   MOCK_DEST_PRIVATE (repo_exists 响应的目标端可见性，默认 false)
+#   MOCK_DEST_DEFAULT_BRANCH (非空时 repo_exists 响应追加 default_branch，默认不加)
 #   MOCK_CREATE_CODE / MOCK_PATCH_CODE
+#   MOCK_API_FAIL_ONCE=000|500|429 + MOCK_API_FAIL_MARKER：首次平台 API 失败（测 request 层重试）
+#   MOCK_API_FAIL_ALWAYS=000|500|429：平台 API 每次均失败（测三态返回 2，持续故障）
 # ============================================================
 args="$*"
 
@@ -20,6 +23,30 @@ if [[ "${MOCK_GH_FAIL_ONCE:-}" == true && \
   if [[ ! -f "${MOCK_GH_MARKER:-}" ]]; then
     : > "${MOCK_GH_MARKER:-/dev/null}" 2>/dev/null || true
     printf '%s\n%s' '{"message":"mock transient failure"}' "500"
+    exit 0
+  fi
+fi
+
+# 模拟平台 API 故障（非 GitHub）——用于测试平台 request 层的重试与三态语义
+#   MOCK_API_FAIL_ALWAYS：每次均失败
+#   MOCK_API_FAIL_ONCE：首次失败（marker 不存在时），之后正常
+# 值 000 模拟 curl 失败（退出码 28，无输出）；500/429 返回对应状态码
+if [[ "$args" == *api/v5/* ]]; then
+  if [[ -n "${MOCK_API_FAIL_ALWAYS:-}" ]]; then
+    if [[ "$MOCK_API_FAIL_ALWAYS" == "000" ]]; then
+      echo "mock: 模拟 curl 失败（网络错误或超时）" >&2
+      exit 28
+    fi
+    printf '%s\n%s' '{"message":"mock api failure"}' "$MOCK_API_FAIL_ALWAYS"
+    exit 0
+  fi
+  if [[ -n "${MOCK_API_FAIL_ONCE:-}" && ! -f "${MOCK_API_FAIL_MARKER:-}" ]]; then
+    : > "${MOCK_API_FAIL_MARKER:-/dev/null}" 2>/dev/null || true
+    if [[ "$MOCK_API_FAIL_ONCE" == "000" ]]; then
+      echo "mock: 模拟 curl 失败（网络错误或超时）" >&2
+      exit 28
+    fi
+    printf '%s\n%s' '{"message":"mock api failure"}' "$MOCK_API_FAIL_ONCE"
     exit 0
   fi
 fi
@@ -68,10 +95,16 @@ fi
 
 # 仓库存在检查（GET .../repos/{owner}/{repo}）
 # 响应含 private 字段（repo_exists 解析它设置 DEST_REPO_PRIVATE）；
-# MOCK_DEST_PRIVATE 控制目标端当前可见性（默认 false）
+# MOCK_DEST_PRIVATE 控制目标端当前可见性（默认 false）；
+# MOCK_DEST_DEFAULT_BRANCH 非空时响应追加 default_branch（默认不加，保证既有用例零回归）
+_repo_body="{\"id\":1,\"full_name\":\"x/y\",\"private\":${MOCK_DEST_PRIVATE:-false}"
+if [[ -n "${MOCK_DEST_DEFAULT_BRANCH:-}" ]]; then
+  _repo_body="${_repo_body},\"default_branch\":\"${MOCK_DEST_DEFAULT_BRANCH}\""
+fi
+_repo_body="${_repo_body}}"
 if [[ "$args" == *gitee.com/api/v5/repos/* ]]; then
   if [[ "${MOCK_GITEE_EXISTS:-true}" == true ]]; then
-    printf '%s\n%s' "{\"id\":1,\"full_name\":\"x/y\",\"private\":${MOCK_DEST_PRIVATE:-false}}" "200"
+    printf '%s\n%s' "$_repo_body" "200"
   else
     printf '%s\n%s' '{"message":"仓库不存在"}' "404"
   fi
@@ -79,7 +112,7 @@ if [[ "$args" == *gitee.com/api/v5/repos/* ]]; then
 fi
 if [[ "$args" == *gitcode.com/api/v5/repos/* ]]; then
   if [[ "${MOCK_GITCODE_EXISTS:-false}" == true ]]; then
-    printf '%s\n%s' "{\"id\":1,\"full_name\":\"x/y\",\"private\":${MOCK_DEST_PRIVATE:-false}}" "200"
+    printf '%s\n%s' "$_repo_body" "200"
   else
     printf '%s\n%s' '{"message":"仓库不存在"}' "404"
   fi

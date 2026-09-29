@@ -96,4 +96,53 @@ assert_status 1 $rc
 assert_contains "$out" "priv***"      # private-one → 前4位+***
 assert_not_contains "$out" "private-one"
 
+# ---------- 场景4: 平台级失败可见性（汇总计数 + annotation + Step Summary + strict） ----------
+export MOCK_GH_REPOS_JSON='[{"name":"repo-a","private":true,"fork":false,"archived":false,"default_branch":"main"}]'
+export WORK_DIR="$FAKE_ROOT/workdir-pfail"
+export MOCK_PUSH_TIMEOUT=true    # 仅 gitee 的 push 超时 → 仓库 OK 但 gitee 平台失败
+export GITHUB_STEP_SUMMARY="$FAKE_ROOT/step-summary.md"; rm -f "$GITHUB_STEP_SUMMARY"
+
+out=$(env PATH=$PROJECT_ROOT/tests/mocks:$PATH HOME=$FAKE_ROOT/home \
+  SRC_ACCOUNT=test SRC_TOKEN=fake SRC_ACCOUNT_TYPE=user \
+  BLACKLIST= WHITELIST= SKIP_FORKS=false SKIP_ARCHIVED=false \
+  DST_PRIVATE=auto CONCURRENCY=2 REPO_TIMEOUT=120 DRY_RUN=false API_RETRY_DELAY=0 \
+  GITHUB_ACTIONS=true STRICT=false \
+  DST_GITEE_ACCOUNT=test DST_GITEE_TOKEN=fake \
+  DST_GITCODE_ACCOUNT=test DST_GITCODE_TOKEN=fake \
+  MIRROR_PRIVATE_KEY=fake-key WORK_DIR=$WORK_DIR \
+  bash $PROJECT_ROOT/scripts/mirror.sh)
+rc=$?
+
+t "场景4: strict 默认 false → 平台级失败不影响退出码"
+assert_status 0 $rc
+
+t "场景4: 汇总行含平台失败计数"
+assert_contains "$out" "平台失败 1"
+assert_contains "$out" "存在平台级失败"
+
+t "场景4: 平台级失败显式列出 + CI annotation"
+assert_contains "$out" "[平台失败] repo***: gitee"
+assert_contains "$out" "::warning::repo*** 平台同步失败: gitee"
+
+t "场景4: Step Summary 写入 markdown 表格（私有名脱敏）"
+assert_file_contains "$GITHUB_STEP_SUMMARY" "| 仓库 | 可见性 | 状态 | 耗时 | 失败平台 |"
+assert_file_contains "$GITHUB_STEP_SUMMARY" "| repo*** | private | ok |"
+assert_file_contains "$GITHUB_STEP_SUMMARY" "gitee"
+assert_not_contains "$(cat "$GITHUB_STEP_SUMMARY")" "repo-a"
+
+t "场景4/5: strict=true 时平台级失败使 job 失败（退出码 1）"
+out=$(env PATH=$PROJECT_ROOT/tests/mocks:$PATH HOME=$FAKE_ROOT/home \
+  SRC_ACCOUNT=test SRC_TOKEN=fake SRC_ACCOUNT_TYPE=user \
+  BLACKLIST= WHITELIST= SKIP_FORKS=false SKIP_ARCHIVED=false \
+  DST_PRIVATE=auto CONCURRENCY=2 REPO_TIMEOUT=120 DRY_RUN=false API_RETRY_DELAY=0 \
+  GITHUB_ACTIONS=true STRICT=true \
+  DST_GITEE_ACCOUNT=test DST_GITEE_TOKEN=fake \
+  DST_GITCODE_ACCOUNT=test DST_GITCODE_TOKEN=fake \
+  MIRROR_PRIVATE_KEY=fake-key WORK_DIR=$WORK_DIR \
+  bash $PROJECT_ROOT/scripts/mirror.sh)
+rc=$?
+assert_status 1 $rc
+assert_contains "$out" "strict=true 且存在平台级失败"
+unset MOCK_PUSH_TIMEOUT GITHUB_STEP_SUMMARY
+
 summary
