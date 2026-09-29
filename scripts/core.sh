@@ -32,15 +32,28 @@ err_tail() { # <行数> <文本> [最大字符数]
 # ---------- 克隆镜像仓库（源端认证走 GIT_ASKPASS basic auth，token 不进 URL / 日志） ----------
 # 通过全局 IS_EMPTY 传值（同 common.sh 的 CURRENT_PLATFORM 模式）：
 # 函数内 log 走 stdout，若用命令替换捕获返回值会把日志一起吞掉
+# 失败重试 1 次（同 push 语义：网络抖动类快速失败才值得重试；超时挂起不重试）
 clone_mirror() { # <repo> → 设置 IS_EMPTY=true(空)|false；非零退出 = clone 失败
-  local repo="$1" clone_out
+  local repo="$1" clone_out rc attempt
 
-  if ! clone_out=$(_timeout git clone --mirror \
-      "https://github.com/$SRC_ACCOUNT/$repo.git" "$WORK_DIR/$repo.git" 2>&1); then
-    log "    [错误] clone 失败: $(err_tail 3 "$(redact_repo "$clone_out" "$SRC_ACCOUNT" "$repo")")"
-    return 1
-  fi
-  log "  clone 完成"
+  for attempt in 1 2; do
+    clone_out=$(_timeout git clone --mirror \
+      "https://github.com/$SRC_ACCOUNT/$repo.git" "$WORK_DIR/$repo.git" 2>&1)
+    rc=$?
+    if [[ $rc -eq 0 ]]; then
+      log "  clone 完成"
+      break
+    fi
+    if [[ $rc -eq 124 ]]; then
+      # 超时=挂起（macOS 无 timeout 时 rc 为 git 原码，不会出现 124）：
+      # 重试大概率仍挂起，直接判失败（同 mirror_push 语义）
+      log "    [错误] clone 超时（超过 ${REPO_TIMEOUT:-600}s 无响应，已终止，不重试）"
+      return 1
+    fi
+    log "    [错误] clone 失败（第 $attempt 次）: $(err_tail 3 "$(redact_repo "$clone_out" "$SRC_ACCOUNT" "$repo")")"
+    rm -rf "$WORK_DIR/$repo.git"   # 清理半成品目录，否则重试会因目录非空而失败
+    [[ $attempt -eq 2 ]] && return 1
+  done
 
   # 空仓库（无任何分支/tag）标记：仍建仓，但不推送
   if git --git-dir="$WORK_DIR/$repo.git" show-ref --quiet 2>/dev/null; then
@@ -93,7 +106,10 @@ sync_to_platform() { # <platform> <repo> <is_private> <def_branch> <is_empty> �
   priv=$(resolve_private "$is_private" "$p")
   log "  → $p/$acct (private=$priv)"
 
-  # 目标仓库不存在则创建
+  # 目标仓库不存在则创建。
+  # repo_exists/create_repo 在已确认目标端可见性时设置全局 DEST_REPO_PRIVATE（true|false），
+  # 无法确认（如 422 幂等兜底、响应缺字段）时留空
+  DEST_REPO_PRIVATE=""
   if platform_call repo_exists "$acct" "$repo"; then
     log "    目标仓库已存在"
   elif platform_call create_repo "$acct" "$repo" "$priv"; then
@@ -103,8 +119,12 @@ sync_to_platform() { # <platform> <repo> <is_private> <def_branch> <is_empty> �
     return 1
   fi
 
-  # 校正可见性（跟随源，可修复历史误建为私有的公开仓库）
-  if platform_call set_visibility "$acct" "$repo" "$priv"; then
+  # 校正可见性（跟随源，可修复历史误建为私有的公开仓库）。
+  # 已知目标端可见性与预期一致时跳过 PATCH（省 1 次请求/仓库/平台，降低限流风险）；
+  # 未知时仍校正，宁多一次请求不漏校正
+  if [[ -n "$DEST_REPO_PRIVATE" && "$DEST_REPO_PRIVATE" == "$priv" ]]; then
+    log "    可见性已一致 (private=$priv)，跳过校正"
+  elif platform_call set_visibility "$acct" "$repo" "$priv"; then
     log "    可见性校正为 $([ "$priv" == true ] && echo private || echo public)"
   else
     log "    [warn] 校正可见性失败 (HTTP $API_CODE)"
@@ -137,7 +157,7 @@ sync_one() {
   local repo="$1" is_private="$2" def_branch="$3" p platform_ok=0 shown fail_platforms=""
   IS_EMPTY=false
 
-  REPO_MASK_PRIVATE="$is_private"   # 供 redact_repo 判断是否脱敏
+  REPO_MASK_PRIVATE="$is_private"   # 供 redact_repo 判断是否脱敏（跨函数全局）
   shown=$(mask_repo "$repo" "$is_private")
   log "== 开始同步: $shown (默认分支: $def_branch) =="
 
@@ -179,6 +199,7 @@ main() {
   WORK_DIR="${WORK_DIR:-${RUNNER_TEMP:-/tmp}/git-mirror}"
   mkdir -p "$WORK_DIR"/logs "$WORK_DIR"/status/ok "$WORK_DIR"/status/fail
 
+  # shellcheck disable=SC2034   # 跨函数/子 shell 读取的全局（redact_repo 判断是否脱敏）
   REPO_MASK_PRIVATE="$is_private"
   shown=$(mask_repo "$repo" "$is_private")
   logfile="$WORK_DIR/logs/$repo.log"

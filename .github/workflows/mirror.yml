@@ -29,7 +29,6 @@ jobs:
           concurrency: '4'
           repo_timeout: '600'
           dry_run: 'false'
-          debug: 'false'
         env:
           # 目标平台：每加一个平台，加两个变量即可（脚本自动发现 DST_*_ACCOUNT）
           DST_GITEE_ACCOUNT: yansongda   # TODO: 改为你的 Gitee 用户名

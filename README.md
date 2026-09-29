@@ -14,7 +14,7 @@
 │  scripts/                                                     │
 │  ├── mirror.sh   # 编排：校验/列仓库/过滤/并发调度/汇总        │
 │  ├── core.sh     # 同步核心（每仓一进程）：clone→建仓→push→默认分支  │
-│  ├── common.sh   # 通用基础：日志/脱敏/API/平台发现/SSH        │
+│  ├── common.sh   # 通用基础：日志/脱敏/超时/平台发现与分派/SSH        │
 │  ├── gh.sh       # GitHub 源端：仓库列表获取                  │
 │  └── platforms/  # 平台插件（加平台=加文件+2个环境变量）      │
 │      ├── gitee.sh    #  PLATFORM_HOST / PLATFORM_API          │
@@ -65,7 +65,6 @@
 | `concurrency` | — | `4` | 并发同步仓库数 |
 | `repo_timeout` | — | `600` | 单个 git 命令超时（秒） |
 | `dry_run` | — | `false` | 仅列出仓库清单与建仓检查，不 clone / push |
-| `debug` | — | `false` | 失败时打印仓库详细日志 |
 
 ### 环境变量（目标平台发现 + 密钥）
 
@@ -87,9 +86,9 @@
 | 方法 | 签名 | 语义 |
 |---|---|---|
 | `platform_<name>_host` | `() → host` | SSH 主机名（push URL / known_hosts） |
-| `platform_<name>_repo_exists` | `(owner repo) → 0/1` | 目标仓库是否存在 |
-| `platform_<name>_create_repo` | `(owner repo private) → 0/1` | 建仓（private=true/false） |
-| `platform_<name>_set_visibility` | `(owner repo private) → 0/1` | 校正可见性跟随源 |
+| `platform_<name>_repo_exists` | `(owner repo) → 0/1` | 目标仓库是否存在；存在时应从响应解析可见性并设置全局 `DEST_REPO_PRIVATE=true\|false`（无法解析则不设，安全降级） |
+| `platform_<name>_create_repo` | `(owner repo private) → 0/1` | 建仓（private=true/false）；新建成功时设置 `DEST_REPO_PRIVATE=private`，幂等兜底（实际已存在）时置空 |
+| `platform_<name>_set_visibility` | `(owner repo private) → 0/1` | 校正可见性跟随源（已一致时 core.sh 会跳过调用，省 1 次请求） |
 | `platform_<name>_set_default_branch` | `(owner repo branch) → 0/1` | 设置默认分支 |
 | `platform_<name>_api`（可选） | `() → base url` | request 层内部用 |
 
@@ -105,12 +104,13 @@
 ## 同步语义与注意事项
 
 - **单向镜像**：目标端只随源变化，被删除的分支/tag 会同步删除；目标端仓库本身（源已删除的仓库）不会自动删除，需手动清理
-- **可见性跟随源**：每次同步都会校正目标端仓库可见性与源一致（公开→公开、私有→私有），可自动修复历史同步中可见性不一致的仓库。注意：Gitee 建仓时公开不传 `private`（其建仓接口对 `private=false` 字符串处理有坑，可能误建私有），但**更新可见性必须显式传 `private=false`** 才能把已误建为私有的仓库改回公开
+- **可见性跟随源**：每次同步都会校正目标端仓库可见性与源一致（公开→公开、私有→私有），可自动修复历史同步中可见性不一致的仓库；目标端可见性已一致时自动跳过该请求（省 1 次 API/仓库/平台，降低限流风险）。注意：Gitee 建仓时公开不传 `private`（其建仓接口对 `private=false` 字符串处理有坑，可能误建私有），但**更新可见性必须显式传 `private=false`** 才能把已误建为私有的仓库改回公开
+- **仓库列表范围（user 模式）**：仅同步 `src_account` **本人拥有**的全部仓库（含私有）；协作者仓库、组织成员仓库不含（这些仓库的 clone 地址不属于源账号，同步必败）——同步组织请用 `src_account_type: org`。启动时会校验 `src_token` 归属（login 必须等于 `src_account`，不一致立即报错），确保列出的仓库始终是源账号本人的
 - **目标端请只读使用**：若有人在目标端直接修改，会被下一次同步覆盖
 - **首次同步为全量**，之后为增量；几十个仓库通常数分钟内完成
 - **空仓库**（无任何提交）只建仓不推送
-- 同步失败不中断其他仓库；失败仓库的日志位于 runner 临时目录 `logs/<repo>.log`（debug=true 时直接在任务日志中输出尾部）
-- **push 超时语义**：单条 git 命令超过 `repo_timeout`（默认 600s）无响应视为挂起，日志明确提示 `push 超时` 并**不再重试**（挂起重试大概率仍挂起，避免单仓库拖垮整个 job）；认证失败/被拒等快速失败才自动重试 1 次
+- 同步失败不中断其他仓库；失败仓库的日志位于 runner 临时目录 `logs/<repo>.log`，汇总时会在任务日志中输出尾部
+- **git 命令超时与重试**：单条 git 命令（clone/push）超过 `repo_timeout`（默认 600s）无响应视为挂起，日志明确提示超时并**不再重试**（挂起重试大概率仍挂起，避免单仓库拖垮整个 job）；认证失败/被拒等快速失败自动重试 1 次（clone 重试前会清理半成品目录）。源端 GitHub API 瞬时故障（5xx/限流）同样自动重试 1 次
 - **平台级失败标注**：仓库级 OK 但某个平台同步失败时（如 GitCode 被拒但 Gitee 成功），最终汇总会在该仓库后标注 `[部分平台失败: <平台>]`，不再静默吞掉
 - **最终汇总**：同步结束后输出逐仓库成败与耗时一览表（私有名同样脱敏），便于快速总览
 

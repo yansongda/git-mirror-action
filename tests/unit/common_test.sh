@@ -21,6 +21,14 @@ t "in_list 空列表"
 in_list "repo-a" ""
 assert_status 1 $?
 
+t "in_list 逗号后带空格仍命中"
+in_list "repo-b" "repo-a, repo-b"
+assert_status 0 $?
+
+t "in_list 逗号前带空格仍命中"
+in_list "repo-b" "repo-a ,repo-b"
+assert_status 0 $?
+
 # ---------- platform_var / account / token ----------
 t "platform_var 命名"
 assert_eq "DST_GITEE_ACCOUNT" "$(platform_var gitee ACCOUNT)"
@@ -125,14 +133,25 @@ source "$SCRIPT_DIR/platforms/gitcode.sh"
 export CURRENT_PLATFORM=gitee
 
 # Gitee（form + access_token）
-t "gitee repo_exists 存在(200)"
+t "gitee repo_exists 存在(200) 且设置 DEST_REPO_PRIVATE"
+DEST_REPO_PRIVATE=""
 platform_gitee_repo_exists test repo-a
 assert_status 0 $?
+assert_eq "false" "$DEST_REPO_PRIVATE"          # mock 默认响应 private=false
 
-t "gitee repo_exists 不存在(404)"
+t "gitee repo_exists 目标可见性可配置(MOCK_DEST_PRIVATE=true)"
+export MOCK_DEST_PRIVATE=true
+platform_gitee_repo_exists test repo-a
+assert_status 0 $?
+assert_eq "true" "$DEST_REPO_PRIVATE"
+unset MOCK_DEST_PRIVATE
+
+t "gitee repo_exists 不存在(404) 且不设置 DEST_REPO_PRIVATE"
 export MOCK_GITEE_EXISTS=false
+DEST_REPO_PRIVATE=""
 platform_gitee_repo_exists test repo-a
 assert_status 1 $?
+assert_eq "" "$DEST_REPO_PRIVATE"
 unset MOCK_GITEE_EXISTS
 
 t "gitee create_repo 私有传 private=true(201)"
@@ -145,11 +164,13 @@ platform_gitee_create_repo test repo-a true
 assert_status 1 $?
 unset MOCK_CREATE_CODE
 
-t "gitee create_repo 422已存在视为成功(幂等)"
+t "gitee create_repo 422已存在视为成功(幂等)且 DEST_REPO_PRIVATE 置空"
 export MOCK_CREATE_CODE=422
 export CURRENT_PLATFORM=gitee
+DEST_REPO_PRIVATE=stale                      # 验证幂等路径会清空可见性缓存
 platform_gitee_create_repo test repo-a true
 assert_status 0 $?
+assert_eq "" "$DEST_REPO_PRIVATE"
 unset MOCK_CREATE_CODE
 
 t "gitee set_default_branch(200)"
@@ -180,6 +201,18 @@ unset MOCK_LOG_FILE
 
 # GitCode（JSON body）
 export CURRENT_PLATFORM=gitcode
+t "gitcode repo_exists 存在(200) 且设置 DEST_REPO_PRIVATE"
+export MOCK_GITCODE_EXISTS=true
+DEST_REPO_PRIVATE=""
+platform_gitcode_repo_exists test repo-a
+assert_status 0 $?
+assert_eq "false" "$DEST_REPO_PRIVATE"
+unset MOCK_GITCODE_EXISTS
+
+t "gitcode repo_exists 不存在(404)"
+platform_gitcode_repo_exists test repo-a
+assert_status 1 $?
+
 t "gitcode create_repo 私有传 JSON private:true(201)"
 platform_gitcode_create_repo test repo-a true
 assert_status 0 $?

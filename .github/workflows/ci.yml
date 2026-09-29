@@ -27,5 +27,14 @@ jobs:
           done
           echo "全部语法 OK ($(bash --version | head -1))"
 
+      # 静态检查与 OS 无关，仅 ubuntu 跑一次；--severity=warning 过滤 note 级噪音
+      # （tr 'A-Z' 等为 bash 3.2 兼容刻意写法，不采纳 SC2018/2019 建议）
+      - name: shellcheck 静态检查
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          shellcheck --version | head -2
+          shellcheck --severity=warning \
+            scripts/*.sh scripts/platforms/*.sh tests/*.sh tests/lib/*.sh tests/mocks/*
+
       - name: 单元与集成测试
         run: bash tests/run.sh

@@ -28,7 +28,6 @@ load_config() {
   CONCURRENCY="${CONCURRENCY:-4}"
   REPO_TIMEOUT="${REPO_TIMEOUT:-600}"
   DRY_RUN="${DRY_RUN:-false}"
-  DEBUG="${DEBUG:-false}"
   MIRROR_PRIVATE_KEY="${MIRROR_PRIVATE_KEY:-}"
   WORK_DIR="${WORK_DIR:-${RUNNER_TEMP:-/tmp}/git-mirror}"
 }
@@ -46,6 +45,11 @@ validate_config() {
     auto|true|false) ;;
     *) die "DST_PRIVATE 仅支持 auto/true/false (当前: $DST_PRIVATE)" ;;
   esac
+  # WORK_DIR 会被 prepare_workdir 整体 rm -rf，防手滑配成危险路径
+  case "$WORK_DIR" in
+    ""|"/") die "WORK_DIR 非法: '$WORK_DIR'（不得为空或根目录）" ;;
+  esac
+  [[ "$WORK_DIR" != "$HOME" ]] || die "WORK_DIR 非法: 不得指向 HOME 目录"
 }
 
 # ---------- 发现目标平台 + 校验插件完整性 ----------
@@ -121,6 +125,7 @@ dry_run_mode() {
   while IFS=$'\t' read -r name is_private def_branch; do
     shown=$(mask_repo "$name" "$is_private")
     for p in "${PLATFORMS[@]}"; do
+      # shellcheck disable=SC2034   # platform_call 分派时读取的全局
       CURRENT_PLATFORM="$p"
       platform_load "$p" || continue
       acct=$(platform_account "$p")
@@ -137,7 +142,7 @@ dry_run_mode() {
 
 # ---------- 并发同步（每仓库一个 core.sh 进程） ----------
 sync_all() {
-  export SCRIPT_DIR WORK_DIR SRC_ACCOUNT SRC_TOKEN REPO_TIMEOUT DST_PRIVATE DEBUG
+  export SCRIPT_DIR WORK_DIR SRC_ACCOUNT SRC_TOKEN REPO_TIMEOUT DST_PRIVATE
   log "开始同步（并发 ${CONCURRENCY}）..."
   xargs -P "$CONCURRENCY" -n 3 bash "$SCRIPT_DIR/core.sh" < "$WORK_DIR/final.tsv"
 }

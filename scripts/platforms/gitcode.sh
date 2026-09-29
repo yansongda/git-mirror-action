@@ -35,9 +35,21 @@ platform_gitcode_request() {
 }
 
 # ---------- 操作方法（core.sh 经 platform_call 分派调用，签名统一） ----------
-platform_gitcode_repo_exists() { # owner repo
+# 可见性缓存约定: repo_exists 在仓库存在时从响应解析当前可见性并设置全局
+#   DEST_REPO_PRIVATE=true|false（无法解析则不设）；create_repo 新建成功时
+#   设置 DEST_REPO_PRIVATE=<private>。core.sh 据此跳过不必要的
+#   set_visibility PATCH（可见性一致时省 1 次请求）
+
+platform_gitcode_repo_exists() { # owner repo → 0/1；存在时设置 DEST_REPO_PRIVATE
   platform_gitcode_request GET "/repos/$1/$2"
-  [[ $API_CODE == "200" ]]
+  [[ $API_CODE == "200" ]] || return 1
+  local v
+  v=$(printf '%s' "$API_BODY" | jq -r '.private' 2>/dev/null || true)
+  if [[ "$v" == true || "$v" == false ]]; then
+    # shellcheck disable=SC2034   # core.sh 读取的全局可见性缓存
+    DEST_REPO_PRIVATE="$v"
+  fi
+  return 0
 }
 
 platform_gitcode_create_repo() { # owner repo private
@@ -46,7 +58,12 @@ platform_gitcode_create_repo() { # owner repo private
   [[ "$3" == true ]] && body="{\"name\":\"$2\",\"private\":true}"
   platform_gitcode_request POST "/user/repos" "$body"
   # GitCode 建仓成功返回 200（非 201），两者均视为成功
-  [[ $API_CODE == "200" || $API_CODE == "201" ]]
+  if [[ $API_CODE == "200" || $API_CODE == "201" ]]; then
+    # shellcheck disable=SC2034   # core.sh 读取的全局可见性缓存
+    DEST_REPO_PRIVATE="$3"   # 新建可见性即请求值，供上层跳过可见性校正
+    return 0
+  fi
+  return 1
 }
 
 platform_gitcode_set_visibility() { # owner repo private

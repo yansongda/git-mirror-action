@@ -56,6 +56,10 @@ tests/
   `_set_visibility <owner> <repo> <private>`、`_set_default_branch <owner> <repo> <branch>`（均返回 0/1）
 - 可选：`platform_<name>_api` → API base URL（request 层内部用）
 - HTTP 结果写入全局 `API_CODE` / `API_BODY`；认证 token 经 `platform_token <name>` 读取
+- 可见性缓存约定：`repo_exists` 在仓库存在时应从响应解析当前可见性并设置全局
+  `DEST_REPO_PRIVATE=true|false`（无法解析则不设，安全降级）；`create_repo` 新建成功时
+  设置 `DEST_REPO_PRIVATE=<private>`、422 幂等兜底时置空（可见性未知）。
+  core.sh 在缓存值与预期一致时跳过 `set_visibility`（省 1 次请求/仓库/平台）
 - **禁止用全局变量传平台私有状态**（多平台 source 时互相污染）；元数据用带平台前缀的函数返回
 - 新增平台 = 复制 `_template.sh` → 实现方法 → workflow 加 `DST_<NAME>_ACCOUNT/TOKEN` → 测试
 
@@ -117,7 +121,7 @@ bash tests/unit/common_test.sh   # 单文件调试
   `MOCK_LOG_FILE`（记录 mock curl 收到的请求便于断言）
 - 用例风格：`t "用例描述"; <命令>; assert_*; ...; summary` 结尾
 - 新增函数/平台/修复必须补测试；测试文件开头声明覆盖范围
-- **本机环境注意**：本地需安装 `jq`（gh.sh 与分页测试依赖）；
+- **本机环境注意**：本地需安装 `jq`（gh.sh、平台插件 repo_exists 可见性解析与分页测试依赖）；
   macOS 本机 PATH 含空格目录时 integration 的多行 `env` 写法会报错（CI runner 无此问题，
   勿因本机失败误判代码）
 

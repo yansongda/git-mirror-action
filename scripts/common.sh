@@ -46,10 +46,11 @@ else
   _timeout() { "$@"; }
 fi
 
-# ---------- 列表判断（逗号分隔） ----------
+# ---------- 列表判断（逗号分隔，逗号两侧空格被容忍） ----------
 in_list() { # item "csv,list"
   local item="$1" x
-  local IFS=','
+  # IFS 含空格：'repo-a, repo-b' 这类写法也能命中（GitHub 仓库名不含空格）
+  local IFS=', '
   for x in $2; do
     [[ "$item" == "$x" ]] && return 0
   done
@@ -73,6 +74,7 @@ platform_load() { # platform（加载插件：元数据函数 + 操作方法）
     log "  [错误] 平台插件文件不存在: platforms/$1.sh"
     return 1
   fi
+  # shellcheck source=/dev/null   # 路径动态拼接，无法静态追踪
   source "$file" || { log "  [错误] 平台插件加载失败: platforms/$1.sh"; return 1; }
 }
 
@@ -147,34 +149,39 @@ platform_validate() { # platform
 # GitHub 的 git 端点不接受 Authorization: Bearer/token header（一律 401），
 # 只接受 basic auth；通过 askpass 脚本提供用户名/密码，
 # token 经环境变量读取，不进入 URL / git 配置 / 日志 / 磁盘
+# askpass 写在 WORK_DIR（随工作目录清理，不污染 HOME；需 WORK_DIR 已存在）
 init_git_auth() {
   export GIT_TERMINAL_PROMPT=0
-  cat > "$HOME/.git-askpass" <<'EOF'
+  cat > "${WORK_DIR:?WORK_DIR 未初始化}/.git-askpass" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
   *Username*) echo "x-access-token" ;;
   *) echo "${SRC_TOKEN:-}" ;;
 esac
 EOF
-  chmod 700 "$HOME/.git-askpass"
-  export GIT_ASKPASS="$HOME/.git-askpass"
+  chmod 700 "${WORK_DIR:?}/.git-askpass"
+  export GIT_ASKPASS="$WORK_DIR/.git-askpass"
 }
 
 # ---------- SSH 初始化（推送密钥 + 固定 known_hosts 防中间人） ----------
+# 使用独立的 known_hosts.mirror：不覆盖用户已有 known_hosts（本地调试友好）
 init_ssh() {
   [[ -n "${MIRROR_PRIVATE_KEY:-}" ]] || return 0
   mkdir -p "$HOME/.ssh"
   chmod 700 "$HOME/.ssh"
   printf '%s\n' "$MIRROR_PRIVATE_KEY" > "$HOME/.ssh/id_mirror"
   chmod 600 "$HOME/.ssh/id_mirror"
-  : > "$HOME/.ssh/known_hosts"
+  local known_hosts="$HOME/.ssh/known_hosts.mirror"
+  : > "$known_hosts"
   local p h
   while IFS= read -r p; do
     h=$(platform_host "$p")
-    ssh-keyscan -t ed25519,rsa "$h" >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+    ssh-keyscan -t ed25519,rsa "$h" >> "$known_hosts" 2>/dev/null || true
   done < <(discover_platforms)
-  chmod 644 "$HOME/.ssh/known_hosts" 2>/dev/null || true
+  chmod 644 "$known_hosts" 2>/dev/null || true
   # ConnectTimeout：连接阶段 15s 内必须建立（正常握手 <5s），
   # 目标平台网络黑洞时快速失败，避免耗尽整个 REPO_TIMEOUT
-  export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_mirror -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o LogLevel=ERROR"
+  export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_mirror -o IdentitiesOnly=yes \
+-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$known_hosts \
+-o ConnectTimeout=15 -o LogLevel=ERROR"
 }

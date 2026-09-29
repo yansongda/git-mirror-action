@@ -48,10 +48,6 @@ inputs:
     description: 'Only list repos and check destination status, no clone/push (true/false)'
     required: false
     default: 'false'
-  debug:
-    description: 'Print per-repo logs on failure (true/false)'
-    required: false
-    default: 'false'
 
 runs:
   using: composite
@@ -70,6 +66,5 @@ runs:
         CONCURRENCY: ${{ inputs.concurrency }}
         REPO_TIMEOUT: ${{ inputs.repo_timeout }}
         DRY_RUN: ${{ inputs.dry_run }}
-        DEBUG: ${{ inputs.debug }}
       run: |
         bash "${{ github.action_path }}/scripts/mirror.sh"

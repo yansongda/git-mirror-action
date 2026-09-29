@@ -43,23 +43,55 @@ assert_contains "$(grep 'gitcode.com/api/v5/user/repos' "$MOCK_LOG_FILE")" '"pri
 unset MOCK_LOG_FILE
 
 # ---------- 公开仓库: 建仓参数不传 private=false、校正 gitee 显式传 private=false ----------
-t "sync_one 公开仓库建仓参数与可见性校正"
+t "sync_one 公开仓库建仓参数与可见性校正（目标误建私有时校正回公开）"
 make_source_repo repo-pub main
 make_empty_dest "$MOCK_GITEE_DIR/test" repo-pub
 make_empty_dest "$MOCK_GITCODE_DIR/test" repo-pub
 rm -rf "$WORK_DIR/repo-pub.git"
+export MOCK_DEST_PRIVATE=true   # 模拟目标端误建为私有 → 必须显式 PATCH 校正回公开
 export MOCK_LOG_FILE="$WORK_DIR/api.log"; rm -f "$MOCK_LOG_FILE"
 ( set -e; sync_one repo-pub false main ) >"$WORK_DIR/pub.log" 2>&1
 assert_status 0 $?
 # gitcode 不存在 → 建仓；建仓请求（user/repos）JSON 不得含 private 字段（公开默认）
 create_line=$(grep 'user/repos' "$MOCK_LOG_FILE" | head -1)
 assert_not_contains "$create_line" "private"
-# 可见性校正: gitee 显式传 private=false + gitcode JSON private:false
+# 可见性校正: gitee 显式传 private=false；gitcode 走建仓（新建可见性即建仓参数，
+# 一致则跳过 PATCH，省 1 次请求）——用例中 MOCK_GITCODE_EXISTS 默认 false → gitcode 必走建仓
 assert_contains "$(grep -F 'gitee.com/api/v5/repos/' "$MOCK_LOG_FILE" | grep -- '-X PATCH' | head -1)" "name=repo-pub&private=false"
-assert_contains "$(cat "$MOCK_LOG_FILE")" '"private":false'
+assert_eq "" "$(grep 'gitcode.com/api/v5' "$MOCK_LOG_FILE" | grep -- '-X PATCH' | grep 'private' | head -1)"   # gitcode 无可见性 PATCH
 assert_file_contains "$WORK_DIR/pub.log" "可见性校正为 public"
-unset MOCK_LOG_FILE
+unset MOCK_LOG_FILE MOCK_DEST_PRIVATE
 rm -rf "$WORK_DIR/repo-pub.git"
+
+# ---------- 目标可见性已一致时跳过 set_visibility（省 1 次 API） ----------
+t "sync_one 可见性一致时跳过校正"
+make_source_repo repo-vis main
+make_empty_dest "$MOCK_GITEE_DIR/test" repo-vis
+make_empty_dest "$MOCK_GITCODE_DIR/test" repo-vis
+rm -rf "$WORK_DIR/repo-vis.git"
+# MOCK_DEST_PRIVATE 默认 false，与 repo-vis(公开)一致 → 应跳过 PATCH
+export MOCK_LOG_FILE="$WORK_DIR/api-skipvis.log"; rm -f "$MOCK_LOG_FILE"
+( set -e; sync_one repo-vis false main ) >"$WORK_DIR/skipvis.log" 2>&1
+assert_status 0 $?
+assert_file_contains "$WORK_DIR/skipvis.log" "可见性已一致 (private=false)，跳过校正"
+assert_eq "" "$(grep -- '-X PATCH' "$MOCK_LOG_FILE" | grep 'private' | head -1)"   # 无可见性 PATCH 请求
+unset MOCK_LOG_FILE
+rm -rf "$WORK_DIR/repo-vis.git"
+
+# ---------- gitcode 已存在且误建私有 → JSON PATCH {"private":false} ----------
+t "sync_one gitcode 已存在但误建私有时 JSON PATCH 校正回公开"
+make_source_repo repo-gc main
+make_empty_dest "$MOCK_GITEE_DIR/test" repo-gc
+make_empty_dest "$MOCK_GITCODE_DIR/test" repo-gc
+rm -rf "$WORK_DIR/repo-gc.git"
+export MOCK_GITCODE_EXISTS=true MOCK_DEST_PRIVATE=true   # 两平台均误建私有
+export MOCK_LOG_FILE="$WORK_DIR/api-gc.log"; rm -f "$MOCK_LOG_FILE"
+( set -e; sync_one repo-gc false main ) >"$WORK_DIR/gc.log" 2>&1
+assert_status 0 $?
+assert_contains "$(cat "$MOCK_LOG_FILE")" '"private":false'    # gitcode JSON 可见性校正
+assert_file_contains "$WORK_DIR/gc.log" "可见性校正为 public"
+unset MOCK_LOG_FILE MOCK_GITCODE_EXISTS MOCK_DEST_PRIVATE
+rm -rf "$WORK_DIR/repo-gc.git"
 
 # ---------- 空仓库 ----------
 t "sync_one 空仓库仅建仓不推送"
@@ -124,6 +156,17 @@ assert_status 0 $?
 assert_file_contains "$WORK_DIR/pullref.log" "push 完成"
 # 目标端不应出现 refs/pull
 assert_eq "" "$(git --git-dir="$MOCK_GITEE_DIR/test/repo-a.git" for-each-ref refs/pull | head -1)"
+rm -rf "$WORK_DIR/repo-a.git"
+
+# ---------- clone 失败重试（网络抖动类快速失败重试 1 次） ----------
+t "sync_one clone 失败自动重试成功"
+export MOCK_FAIL_CLONE=true MOCK_FAIL_MARKER="$FAKE_ROOT/clone-fail-marker"
+rm -f "$MOCK_FAIL_MARKER"
+( set -e; sync_one repo-a true main ) >"$WORK_DIR/cloneretry.log" 2>&1
+assert_status 0 $?
+assert_file_contains "$WORK_DIR/cloneretry.log" "clone 失败（第 1 次）"
+assert_file_contains "$WORK_DIR/cloneretry.log" "clone 完成"
+unset MOCK_FAIL_CLONE MOCK_FAIL_MARKER
 rm -rf "$WORK_DIR/repo-a.git"
 
 # ---------- 默认分支失败仅警告 ----------

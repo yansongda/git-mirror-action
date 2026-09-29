@@ -29,8 +29,8 @@ make_source_repo() { # repo 名 [默认分支]
   local tmp="$FAKE_ROOT/work"
   rm -rf "$tmp" && mkdir -p "$tmp"
   (
-    cd "$tmp"
-    git clone -q "$dir" w && cd w
+    cd "$tmp" || exit 1
+    git clone -q "$dir" w && cd w || exit 1
     git config user.email test@test && git config user.name test
     echo hi > f.txt && git add . && git commit -qm init
     git push -q origin "$branch"
@@ -45,8 +45,8 @@ add_source_ref() { # repo ref（如 dev 或 v1.0，tag 前缀 t:）
   local tmp="$FAKE_ROOT/work2"
   rm -rf "$tmp" && mkdir -p "$tmp"
   (
-    cd "$tmp"
-    git clone -q "$dir" w && cd w
+    cd "$tmp" || exit 1
+    git clone -q "$dir" w && cd w || exit 1
     git config user.email test@test && git config user.name test
     if [[ "$ref" == t:* ]]; then
       git tag "${ref#t:}"
